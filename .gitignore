@@ -1,0 +1,9 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# SQLite database
+backend/database.db
+
+# VS Code settings
+.vscode/
