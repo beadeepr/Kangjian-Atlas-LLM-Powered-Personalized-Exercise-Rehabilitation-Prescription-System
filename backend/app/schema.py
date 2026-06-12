@@ -3,10 +3,10 @@ from typing import List, Optional
 
 
 class PrescriptionRequest(BaseModel):
-    name: Optional[str]
-    age: Optional[int]
+    name: Optional[str] = None
+    age: Optional[int] = None
     symptoms: str
-    history: Optional[str]
+    history: Optional[str] = None
 
 
 class ActionItem(BaseModel):
