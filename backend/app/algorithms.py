@@ -1,28 +1,48 @@
-import numpy as np
+import math
 from typing import List, Dict, Any
+
+
+def _vector(from_point: List[float], to_point: List[float]) -> List[float]:
+    return [
+        (to_point[index] if index < len(to_point) else 0.0)
+        - (from_point[index] if index < len(from_point) else 0.0)
+        for index in range(3)
+    ]
+
+
+def _norm(vector: List[float]) -> float:
+    return math.sqrt(sum(value * value for value in vector))
+
+
+def _dot(left: List[float], right: List[float]) -> float:
+    return sum(left[index] * right[index] for index in range(3))
+
 
 def calculate_angle(a: List[float], b: List[float], c: List[float]) -> float:
     """
     计算三点构成的夹角 (b为顶点)，返回角度制 (0-180)
     a, b, c: [x, y, z]
     """
-    a = np.array(a)
-    b = np.array(b)
-    c = np.array(c)
+    ba = _vector(b, a)
+    bc = _vector(b, c)
+
+    denominator = _norm(ba) * _norm(bc)
+    if denominator == 0:
+        return 0.0
+    cosine_angle = max(-1.0, min(1.0, _dot(ba, bc) / denominator))
+    angle = math.acos(cosine_angle)
     
-    ba = a - b
-    bc = c - b
-    
-    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
-    angle = np.arccos(np.clip(cosine_angle, -1.0, 1.0))
-    
-    return np.degrees(angle)
+    return math.degrees(angle)
 
 def calculate_distance(p1: List[float], p2: List[float]) -> float:
     """计算两点间的欧几里得距离"""
-    p1 = np.array(p1)
-    p2 = np.array(p2)
-    return np.linalg.norm(p1 - p2)
+    dimension = max(len(p1), len(p2), 3)
+    return math.sqrt(
+        sum(
+            ((p1[index] if index < len(p1) else 0.0) - (p2[index] if index < len(p2) else 0.0)) ** 2
+            for index in range(dimension)
+        )
+    )
 
 def analyze_pose(action_id: str, keypoints: List[List[float]], visibility: List[float]) -> Dict[str, Any]:
     """
@@ -32,6 +52,12 @@ def analyze_pose(action_id: str, keypoints: List[List[float]], visibility: List[
     if not visibility or sum(visibility) / len(visibility) < 0.5:
         return {
             "feedback": ["检测到遮挡严重，请调整位置或光线"],
+            "score": 0,
+            "status": "error"
+        }
+    if not keypoints or len(keypoints) < 33:
+        return {
+            "feedback": ["姿态关键点数量不足，请完整拍摄身体后重试"],
             "score": 0,
             "status": "error"
         }

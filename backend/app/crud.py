@@ -2,6 +2,12 @@ from sqlalchemy.orm import Session
 from . import models, schema
 
 
+def _action_to_dict(action: schema.ActionItem):
+    if hasattr(action, "model_dump"):
+        return action.model_dump()
+    return action.dict()
+
+
 def get_actions_by_prescription(db: Session, prescription_id: int):
     return db.query(models.ActionModel).filter(models.ActionModel.prescription_id == prescription_id).all()
 
@@ -15,31 +21,40 @@ def list_prescriptions(db: Session):
 
 
 def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
-    from .knowledge import load_action_library
-    from .doubao import generate_prescription_summary, DoubaoError
+    from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_request
+    from .doubao import generate_prescription_summary
 
-    actions = load_action_library()
-    selected_actions = [action for action in actions if action.reps > 0][:3]
-    action_names = [action.name for action in selected_actions]
+    selected_actions = select_actions_for_request(
+        symptoms=prescription.symptoms,
+        pain_regions=prescription.pain_regions,
+    )
+    action_payload = [_action_to_dict(action) for action in selected_actions]
 
-    try:
-        result = generate_prescription_summary(
-            patient_name=prescription.name or "患者",
-            age=prescription.age,
-            symptoms=prescription.symptoms,
-            history=prescription.history,
-            actions=action_names,
-        )
-        if isinstance(result, dict):
-            summary = result.get('text') or f"基于主诉 {prescription.symptoms} 的康复处方。推荐动作：{'; '.join(action_names) or '暂无'}。"
-            raw_response = result.get('raw')
-        else:
-            summary = str(result)
-            raw_response = None
-    except DoubaoError:
-        # Fallback to basic summary if Doubao fails
-        summary = f"基于主诉 {prescription.symptoms} 的康复处方。推荐动作：{'; '.join(action_names) or '暂无'}。"
-        raw_response = None
+    result = generate_prescription_summary(
+        patient_name=prescription.name or "患者",
+        age=prescription.age,
+        symptoms=prescription.symptoms,
+        history=prescription.history,
+        actions=action_payload,
+        pain_regions=prescription.pain_regions,
+        mobility_score=prescription.mobility_score,
+        prompt_template=load_prompt_template(),
+    )
+    parsed = result.get("json") if isinstance(result, dict) else None
+    model_summary = parsed.get("summary") if isinstance(parsed, dict) else None
+    summary = model_summary or result.get("text") or render_prescription_summary(
+        name=prescription.name,
+        age=prescription.age,
+        symptoms=prescription.symptoms,
+        history=prescription.history,
+        actions=selected_actions,
+        mobility_score=prescription.mobility_score,
+    )
+    raw_response = {
+        "model_text": result.get("text"),
+        "model_json": parsed,
+        "raw": result.get("raw"),
+    } if isinstance(result, dict) else None
 
     db_prescription = models.PrescriptionModel(
         patient_name=prescription.name,
@@ -69,12 +84,37 @@ def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
 
 
 def create_pose_feedback(db: Session, request: schema.PoseCorrectionRequest):
-    feedback = ["请收下巴，头部前屈过多。", "膝盖角度合适，继续保持。"]
+    from .algorithms import analyze_pose
+
+    if not request.action_id:
+        result = {
+            "feedback": ["缺少动作类型，请先选择要跟练的动作。"],
+            "score": 0,
+            "status": "error",
+        }
+    elif not request.keypoints:
+        result = {
+            "feedback": ["缺少姿态关键点，请重新采集视频帧。"],
+            "score": 0,
+            "status": "error",
+        }
+    else:
+        result = analyze_pose(
+            action_id=request.action_id,
+            keypoints=request.keypoints,
+            visibility=request.visibility or [1.0] * len(request.keypoints),
+        )
+
     db_feedback = models.PoseFeedbackModel(
-        request_data=request.keypoints,
-        feedback=feedback
+        request_data={
+            "action_id": request.action_id,
+            "keypoints": request.keypoints,
+            "visibility": request.visibility,
+            "timestamp": request.timestamp,
+        },
+        feedback=result.get("feedback", [])
     )
     db.add(db_feedback)
     db.commit()
     db.refresh(db_feedback)
-    return db_feedback
+    return result
