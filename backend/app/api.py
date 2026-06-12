@@ -23,8 +23,16 @@ def get_db():
 
 @router.post("/generate_prescription", response_model=PrescriptionResponse)
 def generate_prescription(req: PrescriptionRequest, db: Session = Depends(get_db)):
+    from .validators import validate_pain_regions, validate_symptoms
+
     if not req.symptoms:
         raise HTTPException(status_code=400, detail="symptoms required")
+    pain_region_error = validate_pain_regions(req.pain_regions)
+    if pain_region_error:
+        raise HTTPException(status_code=400, detail=pain_region_error)
+    symptom_error = validate_symptoms(req.symptoms, req.pain_regions)
+    if symptom_error:
+        raise HTTPException(status_code=400, detail=symptom_error)
     prescription = create_prescription(db, req)
     actions = get_actions_by_prescription(db, prescription.id)
     return PrescriptionResponse(
@@ -59,8 +67,12 @@ def read_prescription(prescription_id: int, db: Session = Depends(get_db)):
 
 @router.post("/correct_pose", response_model=PoseCorrectionResponse)
 def correct_pose(req: PoseCorrectionRequest, db: Session = Depends(get_db)):
-    feedback_record = create_pose_feedback(db, req)
-    return PoseCorrectionResponse(feedback=feedback_record.feedback)
+    result = create_pose_feedback(db, req)
+    return PoseCorrectionResponse(
+        feedback=result["feedback"],
+        score=result.get("score"),
+        status=result.get("status"),
+    )
 
 
 @router.get("/prescriptions", response_model=list[PrescriptionResponse])

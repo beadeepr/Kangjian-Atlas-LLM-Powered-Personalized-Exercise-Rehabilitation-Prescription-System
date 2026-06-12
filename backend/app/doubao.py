@@ -23,6 +23,8 @@ def generate_prescription_summary(
     symptoms: str,
     history: Optional[str],
     actions: list[str],
+    pain_regions: Optional[list[str]] = None,
+    mobility_score: Optional[int] = None,
 ) -> str:
     """Generate prescription summary using Doubao LLM."""
     try:
@@ -34,15 +36,26 @@ def generate_prescription_summary(
     age_text = str(age) if age is not None else "未知年龄"
     history_text = history or "无"
 
+    pain_text = "、".join(pain_regions) if pain_regions else "未说明"
+    mobility_text = f"{mobility_score}/10" if mobility_score is not None else "未评估"
+
     prompt = (
-        f"请根据以下信息撰写一个安全、渐进的家庭康复训练摘要。\n"
+        f"你是一名运动康复领域的专业助手。请根据以下已审核的问诊信息，"
+        f"撰写一段专业、谨慎、适合居家执行的康复处方摘要。\n"
         f"患者姓名: {patient_name}\n"
         f"年龄: {age_text}\n"
         f"主诉: {symptoms}\n"
         f"既往病史: {history_text}\n"
+        f"疼痛部位: {pain_text}\n"
+        f"活动度自评: {mobility_text}\n"
         f"推荐动作: {action_text}\n"
         f"\n"
-        f"请输出一段中文康复处方摘要，包含训练目标、注意事项和循序渐进的建议。"
+        f"输出要求：\n"
+        f"1. 使用规范中文，体现康复医学专业性；\n"
+        f"2. 说明训练目标、动作逻辑与循序渐进方案；\n"
+        f"3. 明确疼痛监测原则，出现剧烈疼痛需停止并就医；\n"
+        f"4. 不要编造诊断名称，不要替代医生面诊；\n"
+        f"5. 篇幅控制在150-250字。"
     )
 
     try:

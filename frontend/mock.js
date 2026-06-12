@@ -12,38 +12,95 @@ function enrichAction(action) {
     sets: action.sets ?? catalog?.sets ?? 3,
     reps: action.reps ?? catalog?.reps ?? 10,
     note: action.note ?? "",
-    description: catalog?.description ?? "",
+    description: catalog?.description ?? action.note ?? "",
     contraindications: catalog?.contraindications ?? "",
-    image: catalog?.image ?? "assets/neck_side_bend.svg",
+    image: catalog?.image ?? "assets/exercise_generic.svg",
   };
+}
+
+function scoreAction(action, symptoms, painRegions, history) {
+  const text = `${symptoms} ${history || ""}`;
+  let score = 0;
+
+  (painRegions || []).forEach((region) => {
+    if (action.target_regions?.includes(region)) score += 4;
+    (window.REGION_HINTS[region] || []).forEach((hint) => {
+      if (text.includes(hint)) score += 1;
+    });
+  });
+
+  (action.keywords || []).forEach((keyword) => {
+    if (text.includes(keyword)) score += 3;
+  });
+
+  return score;
+}
+
+function selectActionsForPrescription(formData) {
+  const catalog = Object.values(window.ACTION_CATALOG);
+  const scored = catalog
+    .map((action) => ({
+      action,
+      score: scoreAction(action, formData.symptoms, formData.pain_regions, formData.history),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  let selected = scored.filter((item) => item.score > 0).map((item) => item.action).slice(0, 4);
+
+  if (selected.length < 2) {
+    const regionDefaults = {
+      颈部: ["neck_side_bend", "chin_tuck"],
+      肩部: ["shoulder_roll", "neck_side_bend"],
+      腰部: ["cat_cow", "pelvic_tilt"],
+      膝关节: ["wall_squat", "calf_stretch"],
+      踝关节: ["ankle_pump", "calf_stretch"],
+    };
+    const fallbackIds = [];
+    (formData.pain_regions || []).forEach((region) => {
+      fallbackIds.push(...(regionDefaults[region] || []));
+    });
+    if (!fallbackIds.length) {
+      fallbackIds.push("neck_side_bend", "cat_cow", "wall_squat");
+    }
+    fallbackIds.forEach((id) => {
+      if (selected.length >= 2) return;
+      const candidate = window.ACTION_CATALOG[id];
+      if (candidate && !selected.find((item) => item.id === id)) {
+        selected.push(candidate);
+      }
+    });
+  }
+
+  if (formData.mobility_score <= 4) {
+    selected = selected.map((action) => ({
+      ...action,
+      sets: Math.max(2, action.sets - 1),
+      reps: Math.max(1, action.reps),
+    }));
+  }
+
+  return selected.slice(0, 4).map((action) =>
+    enrichAction({
+      id: action.id,
+      name: action.name,
+      sets: action.sets,
+      reps: action.reps,
+      note: action.description,
+    })
+  );
 }
 
 function buildMockPrescription(formData) {
   const regions = formData.pain_regions?.length
     ? formData.pain_regions.join("、")
     : "未指定";
-  const ids =
-    formData.pain_regions?.includes("膝关节") ||
-    formData.symptoms.includes("膝")
-      ? ["wall_squat", "neck_side_bend"]
-      : ["neck_side_bend", "wall_squat"];
-
-  const actions = ids.map((id) => {
-    const catalog = window.ACTION_CATALOG[id];
-    return enrichAction({
-      id,
-      name: catalog.name,
-      sets: catalog.sets,
-      reps: catalog.reps,
-      note:
-        id === "neck_side_bend"
-          ? "温和进行，出现强烈疼痛立即停止"
-          : "保持呼吸顺畅，膝盖勿超过脚尖",
-    });
-  });
+  const actions = selectActionsForPrescription(formData);
 
   return {
-    summary: `基于主诉「${formData.symptoms}」的个性化康复处方。疼痛部位：${regions}；活动度自评：${formData.mobility_score}/10。`,
+    summary:
+      `基于主诉「${formData.symptoms}」的个性化康复处方。\n` +
+      `疼痛部位：${regions}；活动度自评：${formData.mobility_score}/10。\n` +
+      `训练原则：循序渐进，以不诱发剧烈疼痛为度；如出现麻木、刺痛或症状加重，请立即停止并就医。`,
     actions,
   };
 }
@@ -52,8 +109,7 @@ function angleBetween(a, b, c) {
   const ab = { x: a[0] - b[0], y: a[1] - b[1] };
   const cb = { x: c[0] - b[0], y: c[1] - b[1] };
   const dot = ab.x * cb.x + ab.y * cb.y;
-  const mag =
-    Math.hypot(ab.x, ab.y) * Math.hypot(cb.x, cb.y) || 1;
+  const mag = Math.hypot(ab.x, ab.y) * Math.hypot(cb.x, cb.y) || 1;
   const cos = Math.max(-1, Math.min(1, dot / mag));
   return (Math.acos(cos) * 180) / Math.PI;
 }
@@ -118,7 +174,6 @@ function mockCorrectPose(payload) {
   }
 
   if (action_id === "neck_side_bend") {
-    const nose = keypoints[0];
     const leftEar = keypoints[7];
     const rightEar = keypoints[8];
     const leftShoulder = keypoints[11];
@@ -175,4 +230,5 @@ window.MockService = {
   resolveActionId,
   mockCorrectPose,
   generateDemoKeypoints,
+  selectActionsForPrescription,
 };

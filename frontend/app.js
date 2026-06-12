@@ -1,9 +1,16 @@
+import { PoseTracker } from "./pose.js";
+
 const state = {
   currentStep: "intake",
   prescription: null,
   currentAction: null,
   cameraStream: null,
   selectedPainRegions: new Set(),
+  poseTracker: null,
+  poseInFlight: false,
+  pendingPosePayload: null,
+  lastPoseSentAt: 0,
+  autoPoseEnabled: false,
 };
 
 const els = {
@@ -14,12 +21,17 @@ const els = {
   mobilityValue: document.getElementById("mobility-value"),
   intakeForm: document.getElementById("intake-form"),
   symptomsError: document.getElementById("symptoms-error"),
+  painRegionsError: document.getElementById("pain-regions-error"),
+  prescriptionMeta: document.getElementById("prescription-meta"),
   prescriptionSummary: document.getElementById("prescription-summary"),
   actionList: document.getElementById("action-list"),
   prescriptionHistory: document.getElementById("prescription-history"),
+  loadingOverlay: document.getElementById("loading-overlay"),
+  loadingText: document.getElementById("loading-text"),
   trainingActionName: document.getElementById("training-action-name"),
   videoShell: document.getElementById("video-shell"),
   video: document.getElementById("video"),
+  overlay: document.getElementById("overlay"),
   videoPlaceholder: document.getElementById("video-placeholder"),
   feedbackOverlay: document.getElementById("feedback-overlay"),
   scoreBadge: document.getElementById("score-badge"),
@@ -27,6 +39,7 @@ const els = {
   statusText: document.getElementById("status-text"),
   feedbackList: document.getElementById("feedback-list"),
   demoHint: document.getElementById("demo-hint"),
+  modeBadge: document.getElementById("mode-badge"),
   toast: document.getElementById("toast"),
 };
 
@@ -36,7 +49,12 @@ function showToast(message) {
   window.clearTimeout(showToast.timer);
   showToast.timer = window.setTimeout(() => {
     els.toast.classList.remove("show");
-  }, 2600);
+  }, 3200);
+}
+
+function setLoading(active, text = "正在处理…") {
+  els.loadingOverlay.classList.toggle("active", active);
+  els.loadingText.textContent = text;
 }
 
 function goToStep(step) {
@@ -54,15 +72,11 @@ function goToStep(step) {
   }
 }
 
-async function fetchWithTimeout(url, options = {}) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = window.APP_CONFIG.FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
-  const timer = window.setTimeout(
-    () => controller.abort(),
-    window.APP_CONFIG.FETCH_TIMEOUT_MS
-  );
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
-    return response;
+    return await fetch(url, { ...options, signal: controller.signal });
   } finally {
     window.clearTimeout(timer);
   }
@@ -80,13 +94,83 @@ function readFormData() {
   };
 }
 
-function validateForm(formData) {
-  if (!formData.symptoms) {
-    els.symptomsError.textContent = "请填写主诉信息";
-    return false;
+const MEDICAL_HINTS = [
+  "痛", "疼", "酸", "胀", "麻", "受限", "不适", "僵硬", "无力",
+  "肿胀", "损伤", "劳损", "突出", "扭伤", "康复", "活动", "弯曲",
+  "拉伸", "久坐", "炎症", "术后", "复发", "疲劳", "劳累", "受伤",
+  "拉伤", "挫伤", "骨折", "压迫", "抽搐", "痉挛", "水肿",
+];
+
+const BODY_PART_HINTS = [
+  "颈", "脖子", "肩", "肩膀", "腰", "背", "后背", "膝", "膝盖", "踝",
+  "肘", "腕", "髋", "腿", "足", "头", "胸", "肌", "关节", "椎", "肩周",
+  "腰椎", "颈椎", "胸椎", "髌", "跟腱", "足底", "手臂", "小腿", "大腿", "肩胛",
+];
+
+function isRehabRelated(text) {
+  if (MEDICAL_HINTS.some((hint) => text.includes(hint))) return true;
+  if (BODY_PART_HINTS.some((hint) => text.includes(hint))) return true;
+  return false;
+}
+
+function validatePainRegions(painRegions = []) {
+  if (!painRegions.length) {
+    return "请至少选择一个疼痛部位";
   }
-  els.symptomsError.textContent = "";
-  return true;
+  return null;
+}
+
+function validateSymptoms(symptoms) {
+  const text = symptoms.trim();
+  if (!text) return "请填写主诉信息";
+  if (text.length < 4) return "主诉描述过短，请至少用一句话说明症状与部位";
+  if (/^\d+$/.test(text)) {
+    return "主诉不能使用纯数字，请描述具体疼痛或活动受限情况";
+  }
+  if (/^[a-zA-Z]+$/.test(text)) {
+    return "请使用中文描述症状，例如：颈部疼痛两周，转头受限";
+  }
+  if (/(.)\1{5,}/.test(text)) {
+    return "主诉内容重复异常，请填写真实的伤病描述";
+  }
+
+  const chineseCount = (text.match(/[\u4e00-\u9fff]/g) || []).length;
+  if (chineseCount < 1) {
+    return "主诉信息不明确，请描述部位、症状与持续时间，例如：腰痛一月，弯腰加重";
+  }
+  if (!isRehabRelated(text)) {
+    return "主诉内容与康复伤病描述不符，请用规范语言描述具体症状，例如：腰部酸痛一月，久坐后加重";
+  }
+  return null;
+}
+
+function validateForm(formData) {
+  const painRegionError = validatePainRegions(formData.pain_regions);
+  const symptomError = validateSymptoms(formData.symptoms);
+
+  els.painRegionsError.textContent = painRegionError || "";
+  els.symptomsError.textContent = symptomError || "";
+
+  return !painRegionError && !symptomError;
+}
+
+async function parseApiError(response) {
+  const raw = await response.text();
+  try {
+    const data = JSON.parse(raw);
+    return data.detail || raw;
+  } catch {
+    return raw || `HTTP ${response.status}`;
+  }
+}
+
+function formatSummary(summary) {
+  return summary
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `<p>${line}</p>`)
+    .join("");
 }
 
 function renderHistoryCard(prescription) {
@@ -101,7 +185,7 @@ function renderHistoryCard(prescription) {
     <article class="history-card">
       <h4>处方 #${prescription.id || "N/A"}</h4>
       ${header ? `<div class="meta">${header}</div>` : ""}
-      <p>${prescription.summary}</p>
+      <div class="summary-block">${formatSummary(prescription.summary)}</div>
       <ul>
         ${prescription.actions
           .map(
@@ -124,12 +208,8 @@ async function loadPrescriptionHistory() {
 
   els.prescriptionHistory.textContent = "正在加载…";
   try {
-    const response = await fetchWithTimeout(
-      `${window.APP_CONFIG.API_BASE}/prescriptions`
-    );
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/prescriptions`);
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
     if (!Array.isArray(data) || data.length === 0) {
       els.prescriptionHistory.textContent = "暂无处方记录。";
@@ -139,49 +219,62 @@ async function loadPrescriptionHistory() {
   } catch (error) {
     const hint =
       error?.name === "AbortError"
-        ? "请求超时，请确认后端已启动（uvicorn app.main:app --port 8000）。"
-        : "加载失败，请确认：① 后端已启动 ② 地址为 http://localhost:8000 ③ 已配置 CORS。";
+        ? "历史处方请求超时，请确认后端已启动。"
+        : "加载失败，请确认后端已启动且 CORS 已配置。";
     els.prescriptionHistory.textContent = hint;
   }
 }
 
 async function requestPrescription(formData) {
   if (window.APP_CONFIG.DEMO_MODE) {
-    return window.MockService.buildMockPrescription(formData);
+    await new Promise((resolve) => window.setTimeout(resolve, 600));
+    return { ...window.MockService.buildMockPrescription(formData), source: "mock" };
   }
 
-  try {
-    const response = await fetchWithTimeout(
-      `${window.APP_CONFIG.API_BASE}/generate_prescription`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          age: formData.age,
-          symptoms: formData.symptoms,
-          history: formData.history,
-        }),
-      }
-    );
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/generate_prescription`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: formData.name,
+        age: formData.age,
+        symptoms: formData.symptoms,
+        history: formData.history,
+        pain_regions: formData.pain_regions,
+        mobility_score: formData.mobility_score,
+      }),
+    },
+    window.APP_CONFIG.PRESCRIPTION_TIMEOUT_MS
+  );
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const data = await response.json();
-    return {
-      summary: data.summary,
-      actions: data.actions.map((action) => window.MockService.enrichAction(action)),
-    };
-  } catch (error) {
-    showToast("处方服务暂不可用，已切换为本地 Mock 数据");
-    return window.MockService.buildMockPrescription(formData);
+  if (!response.ok) {
+    const detail = await parseApiError(response);
+    const error = new Error(detail || `HTTP ${response.status}`);
+    error.status = response.status;
+    throw error;
   }
+
+  const data = await response.json();
+  return {
+    id: data.id,
+    patient_name: data.patient_name,
+    patient_age: data.patient_age,
+    summary: data.summary,
+    actions: data.actions.map((action) => window.MockService.enrichAction(action)),
+    source: "api",
+  };
 }
 
 function renderPrescription(prescription) {
-  els.prescriptionSummary.textContent = prescription.summary;
+  const metaParts = [];
+  if (prescription.id) metaParts.push(`处方编号 #${prescription.id}`);
+  if (prescription.patient_name) metaParts.push(`患者：${prescription.patient_name}`);
+  if (prescription.patient_age) metaParts.push(`年龄：${prescription.patient_age}`);
+  if (prescription.source === "mock") metaParts.push("来源：本地 Mock");
+  if (prescription.source === "api") metaParts.push("来源：豆包后端 API");
+  els.prescriptionMeta.textContent = metaParts.join(" · ");
+  els.prescriptionSummary.innerHTML = formatSummary(prescription.summary);
   els.actionList.innerHTML = "";
 
   prescription.actions.forEach((action) => {
@@ -243,22 +336,16 @@ function updatePoseFeedback(result) {
           : "检测中";
 
   els.statusDot.className = "status-dot";
-  if (status) {
-    els.statusDot.classList.add(status);
-  }
+  if (status) els.statusDot.classList.add(status);
 
   els.videoShell.classList.remove("status-ok", "status-warning", "status-error");
-  if (status) {
-    els.videoShell.classList.add(`status-${status}`);
-  }
+  if (status) els.videoShell.classList.add(`status-${status}`);
 
   els.feedbackList.innerHTML = "";
   (feedback || []).forEach((line, index) => {
     const item = document.createElement("li");
     item.textContent = line;
-    if (index === 0) {
-      item.classList.add("latest");
-    }
+    if (index === 0) item.classList.add("latest");
     els.feedbackList.appendChild(item);
   });
 
@@ -273,32 +360,68 @@ async function correctPose(payload) {
     return window.MockService.mockCorrectPose(payload);
   }
 
-  try {
-    const response = await fetchWithTimeout(
-      `${window.APP_CONFIG.API_BASE}/correct_pose`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      }
-    );
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/correct_pose`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    },
+    window.APP_CONFIG.POSE_TIMEOUT_MS
+  );
 
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  const data = await response.json();
+  return {
+    feedback: data.feedback || ["暂无反馈"],
+    score: data.score ?? 0,
+    status: data.status || "warning",
+  };
+}
 
-    const data = await response.json();
-    return {
-      feedback: data.feedback || ["暂无反馈"],
-      score: data.score ?? 0,
-      status: data.status || "warning",
+function queuePosePayload(frame) {
+  if (!state.currentAction?.id || !state.autoPoseEnabled) return;
+
+  const now = Date.now();
+  if (now - state.lastPoseSentAt < window.APP_CONFIG.POSE_SEND_INTERVAL_MS) {
+    state.pendingPosePayload = {
+      action_id: state.currentAction.id,
+      keypoints: frame.keypoints,
+      visibility: frame.visibility,
+      timestamp: now,
     };
+    return;
+  }
+
+  state.pendingPosePayload = {
+    action_id: state.currentAction.id,
+    keypoints: frame.keypoints,
+    visibility: frame.visibility,
+    timestamp: now,
+  };
+  pumpPoseCorrection();
+}
+
+async function pumpPoseCorrection() {
+  if (state.poseInFlight || !state.pendingPosePayload) return;
+
+  state.poseInFlight = true;
+  const payload = state.pendingPosePayload;
+  state.pendingPosePayload = null;
+  state.lastPoseSentAt = payload.timestamp;
+
+  try {
+    const result = await correctPose(payload);
+    updatePoseFeedback(result);
   } catch (error) {
-    return {
-      feedback: ["网络连接不稳定，请检查网络"],
+    updatePoseFeedback({
+      feedback: ["网络连接不稳定，请检查网络或后端服务"],
       score: 0,
       status: "error",
-    };
+    });
+  } finally {
+    state.poseInFlight = false;
+    if (state.pendingPosePayload) pumpPoseCorrection();
   }
 }
 
@@ -321,24 +444,45 @@ async function startCamera() {
   }
 
   try {
-    if (state.cameraStream) {
-      state.cameraStream.getTracks().forEach((track) => track.stop());
-    }
+    setLoading(true, "正在启动摄像头与姿态模型…");
+    stopCamera();
+
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false,
     });
     state.cameraStream = stream;
     els.video.srcObject = stream;
+    await els.video.play();
     els.videoShell.classList.add("camera-active");
-    els.statusText.textContent = "摄像头已开启";
-    showToast("摄像头已启动，可点击模拟检测查看反馈样式");
+
+    if (!state.poseTracker) {
+      state.poseTracker = new PoseTracker({
+        video: els.video,
+        canvas: els.overlay,
+        onFrame: queuePosePayload,
+      });
+      await state.poseTracker.init();
+    }
+
+    state.autoPoseEnabled = true;
+    state.poseTracker.start();
+    els.statusText.textContent = "实时检测中";
+    showToast("摄像头与 MediaPipe 已启动，正在实时分析动作");
   } catch (error) {
-    showToast("无法访问摄像头，请检查浏览器权限");
+    showToast(error?.message?.includes("MediaPipe")
+      ? "姿态模型加载失败，请检查网络后重试"
+      : "无法访问摄像头，请检查浏览器权限");
+  } finally {
+    setLoading(false);
   }
 }
 
 function stopCamera() {
+  state.autoPoseEnabled = false;
+  state.pendingPosePayload = null;
+  state.poseInFlight = false;
+  state.poseTracker?.stop();
   if (state.cameraStream) {
     state.cameraStream.getTracks().forEach((track) => track.stop());
     state.cameraStream = null;
@@ -354,13 +498,48 @@ async function simulatePoseDetection() {
   }
 
   const demo = window.MockService.generateDemoKeypoints(state.currentAction.id);
-  const result = await correctPose({
-    action_id: state.currentAction.id,
-    keypoints: demo.keypoints,
-    visibility: demo.visibility,
-    timestamp: Date.now(),
-  });
-  updatePoseFeedback(result);
+  try {
+    const result = await correctPose({
+      action_id: state.currentAction.id,
+      keypoints: demo.keypoints,
+      visibility: demo.visibility,
+      timestamp: Date.now(),
+    });
+    updatePoseFeedback(result);
+  } catch (error) {
+    updatePoseFeedback({
+      feedback: ["模拟检测失败，请确认后端服务可用"],
+      score: 0,
+      status: "error",
+    });
+  }
+}
+
+async function testDoubaoConnection() {
+  if (window.APP_CONFIG.DEMO_MODE) {
+    showToast("请先关闭 Demo 模式再测试豆包连接");
+    return;
+  }
+
+  setLoading(true, "正在测试豆包 API 连接…");
+  try {
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/test_doubao`,
+      { method: "POST" },
+      window.APP_CONFIG.PRESCRIPTION_TIMEOUT_MS
+    );
+    const data = await response.json();
+    if (data.status === "success") {
+      showToast("豆包连接成功，摘要已生成");
+      window.alert(`豆包测试成功：\n\n${data.summary}`);
+    } else {
+      showToast(`豆包连接失败：${data.detail || "未知错误"}`);
+    }
+  } catch (error) {
+    showToast("豆包测试请求失败，请检查后端与环境变量");
+  } finally {
+    setLoading(false);
+  }
 }
 
 function initPainRegions() {
@@ -377,9 +556,17 @@ function initPainRegions() {
         state.selectedPainRegions.add(region);
         button.classList.add("selected");
       }
+      if (state.selectedPainRegions.size > 0) {
+        els.painRegionsError.textContent = "";
+      }
     });
     els.painRegions.appendChild(button);
   });
+}
+
+function updateModeBadge() {
+  els.modeBadge.textContent = window.APP_CONFIG.DEMO_MODE ? "Demo 模式" : "API 模式";
+  els.modeBadge.className = window.APP_CONFIG.DEMO_MODE ? "mode-badge demo" : "mode-badge api";
 }
 
 function bindEvents() {
@@ -390,22 +577,48 @@ function bindEvents() {
   els.intakeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
     const formData = readFormData();
-    if (!validateForm(formData)) {
-      return;
-    }
+    if (!validateForm(formData)) return;
 
     const submitButton = document.getElementById("submit-prescription");
     submitButton.disabled = true;
     submitButton.textContent = "生成中…";
+    setLoading(
+      true,
+      window.APP_CONFIG.DEMO_MODE
+        ? "正在生成本地 Mock 处方…"
+        : "正在调用豆包生成个性化处方，请稍候…"
+    );
 
     try {
       const prescription = await requestPrescription(formData);
       state.prescription = prescription;
       renderPrescription(prescription);
       goToStep("prescription");
+      showToast(
+        prescription.source === "api"
+          ? "处方已由后端豆包服务生成"
+          : "已使用本地 Mock 处方"
+      );
+    } catch (error) {
+      const isTimeout = error?.name === "AbortError";
+      if (error?.status === 400) {
+        if (error.message.includes("疼痛部位")) {
+          els.painRegionsError.textContent = error.message;
+        } else {
+          els.symptomsError.textContent = error.message;
+        }
+        showToast(error.message);
+      } else {
+        showToast(
+          isTimeout
+            ? "豆包生成超时，请稍后重试或检查后端配置"
+            : "处方服务失败，请检查后端与 DOUBAO_API_KEY"
+        );
+      }
     } finally {
       submitButton.disabled = false;
       submitButton.textContent = "生成康复处方";
+      setLoading(false);
     }
   });
 
@@ -415,6 +628,11 @@ function bindEvents() {
 
   document.getElementById("start-camera").addEventListener("click", startCamera);
   document.getElementById("simulate-pose").addEventListener("click", simulatePoseDetection);
+  document.getElementById("test-doubao").addEventListener("click", testDoubaoConnection);
+  document.getElementById("toggle-demo").addEventListener("click", () => {
+    window.APP_CONFIG.setDemoMode(!window.APP_CONFIG.DEMO_MODE);
+    location.reload();
+  });
   document.getElementById("stop-training").addEventListener("click", () => {
     stopCamera();
     goToStep("prescription");
@@ -433,14 +651,15 @@ function bindEvents() {
 
 function initDemoHint() {
   els.demoHint.textContent = window.APP_CONFIG.DEMO_MODE
-    ? "当前为 Demo 模式。接后端请在 Console 执行：APP_CONFIG.setDemoMode(false); location.reload();"
-    : "已连接后端 API。切回 Mock：APP_CONFIG.setDemoMode(true); location.reload();";
+    ? "Demo 模式：处方与纠正使用本地 Mock。点击「切换 API 模式」连接豆包后端。"
+    : "API 模式：处方走豆包，纠正走后端算法。需要后端运行在 localhost:8000。";
 }
 
 function init() {
   initPainRegions();
   bindEvents();
   initDemoHint();
+  updateModeBadge();
   goToStep("intake");
 }
 

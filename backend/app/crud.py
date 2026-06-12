@@ -15,11 +15,15 @@ def list_prescriptions(db: Session):
 
 
 def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
-    from .knowledge import load_action_library
+    from .knowledge import select_actions_for_prescription
     from .doubao import generate_prescription_summary, DoubaoError
 
-    actions = load_action_library()
-    selected_actions = [action for action in actions if action.reps > 0][:3]
+    selected_actions = select_actions_for_prescription(
+        symptoms=prescription.symptoms,
+        pain_regions=prescription.pain_regions,
+        history=prescription.history,
+        mobility_score=prescription.mobility_score,
+    )
     action_names = [action.name for action in selected_actions]
 
     try:
@@ -29,6 +33,8 @@ def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
             symptoms=prescription.symptoms,
             history=prescription.history,
             actions=action_names,
+            pain_regions=prescription.pain_regions,
+            mobility_score=prescription.mobility_score,
         )
     except DoubaoError:
         # Fallback to basic summary if Doubao fails
@@ -61,12 +67,37 @@ def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
 
 
 def create_pose_feedback(db: Session, request: schema.PoseCorrectionRequest):
-    feedback = ["请收下巴，头部前屈过多。", "膝盖角度合适，继续保持。"]
+    from .algorithms import analyze_pose
+
+    action_id = request.action_id or ""
+    keypoints = request.keypoints or []
+    visibility = request.visibility or []
+
+    if not keypoints or len(keypoints) < 33:
+        result = {
+            "feedback": ["请全身入镜，确保摄像头能拍到完整身体"],
+            "score": 0,
+            "status": "error",
+        }
+    elif action_id not in {"wall_squat", "neck_side_bend"}:
+        result = {
+            "feedback": ["暂不支持该动作"],
+            "score": 0,
+            "status": "error",
+        }
+    else:
+        result = analyze_pose(action_id, keypoints, visibility)
+
     db_feedback = models.PoseFeedbackModel(
-        request_data=request.keypoints,
-        feedback=feedback
+        request_data={
+            "action_id": action_id,
+            "keypoints": keypoints,
+            "visibility": visibility,
+            "timestamp": request.timestamp,
+        },
+        feedback=result["feedback"],
     )
     db.add(db_feedback)
     db.commit()
     db.refresh(db_feedback)
-    return db_feedback
+    return result

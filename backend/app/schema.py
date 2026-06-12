@@ -7,6 +7,8 @@ class PrescriptionRequest(BaseModel):
     age: Optional[int] = None
     symptoms: str
     history: Optional[str] = None
+    pain_regions: Optional[List[str]] = None
+    mobility_score: Optional[int] = None
 
 
 class ActionItem(BaseModel):
@@ -25,9 +27,13 @@ class PrescriptionResponse(BaseModel):
 
 
 class PoseCorrectionRequest(BaseModel):
-    # For MVP accept keypoints or base64 image; here we accept simple keypoints placeholder
-    keypoints: Optional[List[List[float]]]
+    action_id: Optional[str] = None
+    keypoints: Optional[List[List[float]]] = None
+    visibility: Optional[List[float]] = None
+    timestamp: Optional[int] = None
 
 
 class PoseCorrectionResponse(BaseModel):
     feedback: List[str]
+    score: Optional[int] = None
+    status: Optional[str] = None

@@ -3,18 +3,82 @@
     {
       "id": "neck_side_bend",
       "name": "颈部侧屈拉伸",
-      "description": "坐姿或站姿，缓慢将头向一侧倾斜，停留20秒，重复3次",
-      "contraindications": "颈椎不稳、急性炎症期禁忌",
+      "description": "坐位或站位，头缓慢向一侧侧屈至轻度拉伸感，停留15–20秒，双侧交替。用于缓解颈侧肌群紧张。",
+      "contraindications": "颈椎不稳、急性神经根压迫症状加重期禁用",
+      "target_regions": ["颈部"],
+      "keywords": ["颈", "颈椎", "脖子", "转头", "落枕"],
       "sets": 3,
-      "reps": 1
+      "reps": 2
+    },
+    {
+      "id": "chin_tuck",
+      "name": "收下巴训练",
+      "description": "坐位，双眼平视前方，下颌微收使后脑勺与衣领贴近，停留5–8秒后放松。强化颈深屈肌，改善头前倾。",
+      "contraindications": "急性颈椎骨折、严重眩晕发作期暂停",
+      "target_regions": ["颈部"],
+      "keywords": ["颈", "低头", "前倾", "伏案", "富贵包"],
+      "sets": 3,
+      "reps": 10
+    },
+    {
+      "id": "shoulder_roll",
+      "name": "肩胛绕环训练",
+      "description": "站立，双肩向后下方绕环，幅度以不诱发疼痛为限，配合缓慢呼吸。改善圆肩与上背僵硬。",
+      "contraindications": "肩关节急性脱位、肩袖急性撕裂期禁用",
+      "target_regions": ["肩部"],
+      "keywords": ["肩", "肩胛", "圆肩", "抬手", "冻结"],
+      "sets": 2,
+      "reps": 10
+    },
+    {
+      "id": "cat_cow",
+      "name": "猫牛式脊柱松动",
+      "description": "四点跪位，交替做脊柱屈曲与伸展，动作缓慢可控。用于改善腰椎活动度与核心控制。",
+      "contraindications": "腰椎间盘突出急性期疼痛明显时减量或暂停",
+      "target_regions": ["腰部"],
+      "keywords": ["腰", "腰椎", "久坐", "弯腰", "僵硬"],
+      "sets": 2,
+      "reps": 8
+    },
+    {
+      "id": "pelvic_tilt",
+      "name": "骨盆后倾训练",
+      "description": "仰卧屈膝，收紧腹部使腰椎贴紧床面，停留5秒后放松。强化腹横肌，减轻腰椎前凸负荷。",
+      "contraindications": "妊娠晚期、急性腰肌痉挛剧痛时谨慎进行",
+      "target_regions": ["腰部"],
+      "keywords": ["腰", "骨盆", "突出", "劳损", "久站"],
+      "sets": 3,
+      "reps": 10
     },
     {
       "id": "wall_squat",
       "name": "靠墙静蹲",
-      "description": "背靠墙，下蹲保持膝盖不超过脚尖，停留30秒，重复3次",
-      "contraindications": "急性膝关节疼痛、严重膝关节炎患者谨慎",
+      "description": "背靠墙缓慢下蹲至大腿与地面近似平行，膝尖不超过脚尖，保持30秒。增强股四头肌与膝周稳定性。",
+      "contraindications": "急性膝关节炎肿胀期、髌股关节疼痛明显时减量",
+      "target_regions": ["膝关节"],
+      "keywords": ["膝", "髌骨", "蹲", "下楼", "跑步"],
       "sets": 3,
       "reps": 1
+    },
+    {
+      "id": "calf_stretch",
+      "name": "小腿后侧拉伸",
+      "description": "面对墙一步距离，后腿伸直脚跟贴地，身体前倾至小腿后侧有牵拉感，停留20秒。缓解跟腱紧张。",
+      "contraindications": "跟腱急性断裂、踝部急性扭伤48小时内不宜",
+      "target_regions": ["踝关节"],
+      "keywords": ["踝", "跟腱", "小腿", "脚跟", "足底"],
+      "sets": 3,
+      "reps": 2
+    },
+    {
+      "id": "ankle_pump",
+      "name": "踝泵运动",
+      "description": "坐位或卧位，脚尖尽力背伸与跖屈，像踩油门一样节律进行。促进下肢静脉回流与踝活动。",
+      "contraindications": "踝部骨折未固定、深静脉血栓未评估前慎用",
+      "target_regions": ["踝关节"],
+      "keywords": ["踝", "肿胀", "术后", "血栓", "久卧"],
+      "sets": 3,
+      "reps": 20
     }
   ]
 }
