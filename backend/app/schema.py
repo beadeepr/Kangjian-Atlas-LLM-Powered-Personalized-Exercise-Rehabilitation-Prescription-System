@@ -22,6 +22,7 @@ class PrescriptionResponse(BaseModel):
     patient_age: Optional[int] = None
     summary: str
     actions: List[ActionItem]
+    raw_response: Optional[dict] = None
 
 
 class PoseCorrectionRequest(BaseModel):

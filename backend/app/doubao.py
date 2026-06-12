@@ -48,14 +48,20 @@ def generate_with_http(prompt: str, model_id: Optional[str] = None, timeout: int
     try:
         data = resp.json()
     except Exception:
-        return resp.text
+        # return both text and raw
+        return {"text": resp.text, "raw": resp.text}
 
     # Attempt to extract text from common fields
+    extracted = None
     if isinstance(data, dict):
         for key in ("output", "result", "data", "choices", "response"):
             if key in data:
-                return json.dumps(data[key], ensure_ascii=False) if not isinstance(data[key], str) else data[key]
-    return json.dumps(data, ensure_ascii=False)
+                val = data[key]
+                extracted = json.dumps(val, ensure_ascii=False) if not isinstance(val, str) else val
+                break
+    if extracted is None:
+        extracted = json.dumps(data, ensure_ascii=False)
+    return {"text": extracted, "raw": data}
 
 
 def generate_summary(prompt: str, model_id: Optional[str] = None) -> str:
@@ -74,15 +80,18 @@ def generate_summary(prompt: str, model_id: Optional[str] = None) -> str:
         # Some SDK variants accept dict directly; wrap in try/except
         if hasattr(client, "create_batch_inference_job"):
             resp = client.create_batch_inference_job(body=payload)
-            # try to return simple representation
+            # try to extract text if possible, else return resp as raw
             try:
-                return str(resp)
+                # attempt to get dict-like representation
+                raw = resp if isinstance(resp, (dict, list)) else getattr(resp, '__dict__', str(resp))
+                text = str(resp)
+                return {"text": text, "raw": raw}
             except Exception:
-                return json.dumps(resp, ensure_ascii=False)
+                return {"text": str(resp), "raw": str(resp)}
         # fallback to other available method names
         if hasattr(client, "create_endpoint"):
             resp = client.create_endpoint(body={"foundationModel": {"model": model_id or DOUBAO_MODEL_ID}})
-            return str(resp)
+            return {"text": str(resp), "raw": resp}
     except Exception:
         # ignore SDK errors and try HTTP fallback
         pass
@@ -113,9 +122,14 @@ def generate_prescription_summary(
     )
 
     try:
-        return generate_summary(prompt)
+        result = generate_summary(prompt)
+        # result may be str or dict
+        if isinstance(result, dict):
+            return result
+        return {"text": result, "raw": None}
     except Exception:
-        return _fallback_summary(patient_name, age, symptoms, history, actions)
+        # fallback returns text string
+        return {"text": _fallback_summary(patient_name, age, symptoms, history, actions), "raw": None}
 
 
 def _fallback_summary(
