@@ -8,7 +8,6 @@ from .crud import (
     list_prescriptions as crud_list_prescriptions,
 )
 from .database import SessionLocal
-from .deepseek import search_deepseek, DeepSeekError
 from .schema import PrescriptionRequest, PrescriptionResponse, ActionItem, PoseCorrectionRequest, PoseCorrectionResponse
 
 router = APIRouter()
@@ -89,12 +88,18 @@ def list_actions():
     return load_action_library()
 
 
-@router.post("/deepseek_search")
-def deepseek_search(req: dict):
-    query = req.get("query")
-    if not query:
-        raise HTTPException(status_code=400, detail="query is required")
+@router.post("/test_doubao")
+def test_doubao():
+    """Test Doubao API connection."""
+    from .doubao import generate_prescription_summary, DoubaoError
     try:
-        return search_deepseek(query, top_k=req.get("top_k", 3))
-    except DeepSeekError as exc:
-        raise HTTPException(status_code=502, detail=str(exc))
+        result = generate_prescription_summary(
+            patient_name="测试患者",
+            age=30,
+            symptoms="腰痛",
+            history="无",
+            actions=["颈部拉伸", "靠墙静蹲"],
+        )
+        return {"status": "success", "summary": result}
+    except DoubaoError as exc:
+        return {"status": "error", "detail": str(exc)}

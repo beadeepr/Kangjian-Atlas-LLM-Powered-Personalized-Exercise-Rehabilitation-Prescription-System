@@ -50,13 +50,16 @@ npx http-server
 - 示例知识库存放在 `knowledge/actions.json`
 - 提示词模板在 `knowledge/prompt_template.txt`
 
-### 4. DeepSeek 集成（可选）
+### 4. 豆包 LLM 集成（火山引擎）
 
-- 将 DeepSeek API Key 配置到环境变量 `DEEPSEEK_API_KEY`
-- 可选配置 `DEEPSEEK_BASE_URL` 和 `DEEPSEEK_SEARCH_PATH`
+- 从火山引擎申请豆包 API Key 和 Model ID
+- 配置环境变量：
+  - `DOUBAO_API_KEY`：你的 API Key
+  - `DOUBAO_BASE_URL`：默认为 `https://ark.cn-beijing.volces.com/api/v3`
+  - `DOUBAO_MODEL_ID`：你的 Model ID（例如 `ep-20250101000000-xxxxx`）
 - 示例配置文件：`.env.sample`
-- 后端已新增 `POST /api/deepseek_search` 接口，用于调试 DeepSeek 检索结果
-- 生成处方时会尝试调用 DeepSeek 检索，结果会整合进处方摘要
+- 后端会使用豆包 LLM 自动生成个性化的康复处方摘要
+- 调试接口：`POST /api/test_doubao`
 
 ---
 

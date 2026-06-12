@@ -15,29 +15,24 @@ def list_prescriptions(db: Session):
 
 
 def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
-    from .knowledge import load_action_library, render_prescription_summary
-    from .deepseek import extract_titles, search_deepseek, DeepSeekError
+    from .knowledge import load_action_library
+    from .doubao import generate_prescription_summary, DoubaoError
 
     actions = load_action_library()
     selected_actions = [action for action in actions if action.reps > 0][:3]
+    action_names = [action.name for action in selected_actions]
 
-    deepseek_summary = None
     try:
-        result = search_deepseek(prescription.symptoms, top_k=3)
-        titles = extract_titles(result)
-        if titles:
-            deepseek_summary = "；".join(titles)
-    except DeepSeekError:
-        deepseek_summary = None
-
-    summary = render_prescription_summary(
-        name=prescription.name,
-        age=prescription.age,
-        symptoms=prescription.symptoms,
-        history=prescription.history,
-        actions=selected_actions,
-        deepseek_summary=deepseek_summary,
-    )
+        summary = generate_prescription_summary(
+            patient_name=prescription.name or "患者",
+            age=prescription.age,
+            symptoms=prescription.symptoms,
+            history=prescription.history,
+            actions=action_names,
+        )
+    except DoubaoError:
+        # Fallback to basic summary if Doubao fails
+        summary = f"基于主诉 {prescription.symptoms} 的康复处方。推荐动作：{'; '.join(action_names) or '暂无'}。"
 
     db_prescription = models.PrescriptionModel(
         patient_name=prescription.name,
