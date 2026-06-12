@@ -16,7 +16,7 @@ def list_prescriptions(db: Session):
 
 def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
     from .knowledge import load_action_library
-    from .doubao import generate_prescription_summary, DoubaoError
+    from .doubao import generate_summary as generate_prescription_summary, DoubaoError
 
     actions = load_action_library()
     selected_actions = [action for action in actions if action.reps > 0][:3]
