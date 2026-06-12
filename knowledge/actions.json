@@ -1,0 +1,20 @@
+{
+  "actions": [
+    {
+      "id": "neck_side_bend",
+      "name": "颈部侧屈拉伸",
+      "description": "坐姿或站姿，缓慢将头向一侧倾斜，停留20秒，重复3次",
+      "contraindications": "颈椎不稳、急性炎症期禁忌",
+      "sets": 3,
+      "reps": 1
+    },
+    {
+      "id": "wall_squat",
+      "name": "靠墙静蹲",
+      "description": "背靠墙，下蹲保持膝盖不超过脚尖，停留30秒，重复3次",
+      "contraindications": "急性膝关节疼痛、严重膝关节炎患者谨慎",
+      "sets": 3,
+      "reps": 1
+    }
+  ]
+}

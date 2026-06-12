@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>康健图谱 - 示例前端</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <h1>康健图谱（示例前端）</h1>
+
+    <section id="form">
+      <h2>问诊表单</h2>
+      <label>主诉<textarea id="symptoms"></textarea></label>
+      <button id="submit">生成处方</button>
+      <pre id="result"></pre>
+    </section>
+
+    <section id="camera">
+      <h2>摄像头实时（示例）</h2>
+      <video id="video" autoplay playsinline width="480" height="360"></video>
+      <canvas id="canvas" width="480" height="360" style="display:none"></canvas>
+      <div id="feedback"></div>
+      <button id="startCam">启动摄像头</button>
+      <button id="sendFrame">发送帧进行纠正（示例）</button>
+    </section>
+
+    <script src="app.js"></script>
+  </body>
+</html>
