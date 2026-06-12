@@ -15,31 +15,69 @@
           <p class="subtitle">个性化运动康复处方生成系统</p>
         </div>
       </div>
+      <div class="header-actions">
+        <div class="user-identity" id="user-identity" hidden>
+          <span class="user-avatar" id="user-avatar">康</span>
+          <div class="user-meta">
+            <strong id="user-display-name">未登录</strong>
+            <span id="user-display-age">年龄未填写</span>
+          </div>
+        </div>
+        <span class="mode-badge demo" id="mode-badge">Demo 模式</span>
+        <button class="btn btn-secondary btn-small" id="toggle-demo" type="button">切换 API 模式</button>
+        <button class="btn btn-secondary btn-small" id="test-doubao" type="button">测试豆包</button>
+      </div>
       <nav class="step-nav" aria-label="流程步骤">
-        <button class="step-item active" data-step="intake" type="button">1 问诊</button>
-        <button class="step-item" data-step="prescription" type="button" disabled>2 处方</button>
-        <button class="step-item" data-step="training" type="button" disabled>3 跟练</button>
+        <button class="step-item active" data-step="login" type="button">1 登录</button>
+        <button class="step-item" data-step="intake" type="button" disabled>2 问诊</button>
+        <button class="step-item" data-step="prescription" type="button" disabled>3 处方</button>
+        <button class="step-item" data-step="history" type="button" disabled>4 历史</button>
+        <button class="step-item" data-step="training" type="button" disabled>5 跟练</button>
       </nav>
     </header>
 
     <main class="app-main">
-      <section id="page-intake" class="page active" aria-labelledby="intake-title">
+      <section class="result-panel card" id="doubao-result-panel" hidden>
+        <div class="result-panel-head">
+          <h2>豆包测试结果</h2>
+          <button class="btn btn-secondary btn-small" id="clear-doubao-result" type="button">收起</button>
+        </div>
+        <p class="hint">这里显示测试豆包接口返回的摘要内容，便于确认当前是否真的命中大模型。</p>
+        <pre id="doubao-result" class="result-block"></pre>
+      </section>
+
+      <section id="page-login" class="page active" aria-labelledby="login-title">
+        <div class="page-head">
+          <h2 id="login-title">用户登录</h2>
+          <p>请先填写基本信息，用于区分不同用户的处方与历史记录。</p>
+        </div>
+
+        <form id="login-form" class="card login-card" novalidate>
+          <div class="field">
+            <label for="login-name">姓名 <span class="required">*</span></label>
+            <input id="login-name" name="login_name" type="text" placeholder="例如：张三" required />
+            <span class="field-error" id="login-name-error"></span>
+          </div>
+
+          <div class="field">
+            <label for="login-age">年龄 <span class="required">*</span></label>
+            <input id="login-age" name="login_age" type="number" min="1" max="120" placeholder="例如：32" required />
+            <span class="field-error" id="login-age-error"></span>
+          </div>
+
+          <div class="form-actions">
+            <button class="btn btn-primary" id="login-submit" type="submit">进入问诊</button>
+          </div>
+        </form>
+      </section>
+
+      <section id="page-intake" class="page" aria-labelledby="intake-title">
         <div class="page-head">
           <h2 id="intake-title">康复问诊</h2>
-          <p>请填写伤病信息与活动情况，系统将生成个性化康复处方。</p>
+          <p>请填写伤病信息与活动情况，系统将调用豆包大模型生成个性化康复处方。</p>
         </div>
 
         <form id="intake-form" class="card form-grid" novalidate>
-          <div class="field">
-            <label for="name">姓名</label>
-            <input id="name" name="name" type="text" placeholder="选填" />
-          </div>
-
-          <div class="field">
-            <label for="age">年龄</label>
-            <input id="age" name="age" type="number" min="1" max="120" placeholder="选填" />
-          </div>
-
           <div class="field field-full">
             <label for="symptoms">主诉 <span class="required">*</span></label>
             <textarea
@@ -49,6 +87,7 @@
               placeholder="例如：颈部疼痛两周，转头受限，久坐后加重"
               required
             ></textarea>
+            <span class="field-hint">请用规范语言描述真实伤病症状（如疼痛、活动受限）；诗句或无关语句将被拦截。</span>
             <span class="field-error" id="symptoms-error"></span>
           </div>
 
@@ -63,8 +102,9 @@
           </div>
 
           <fieldset class="field field-full pain-field">
-            <legend>疼痛部位</legend>
+            <legend>疼痛部位 <span class="required">*</span></legend>
             <div class="chip-group" id="pain-regions"></div>
+            <span class="field-error" id="pain-regions-error"></span>
           </fieldset>
 
           <div class="field field-full">
@@ -90,18 +130,37 @@
       <section id="page-prescription" class="page" aria-labelledby="prescription-title">
         <div class="page-head">
           <h2 id="prescription-title">您的康复处方</h2>
-          <p id="prescription-summary" class="summary-text"></p>
+          <p id="prescription-meta" class="summary-meta"></p>
+          <div id="prescription-summary" class="summary-block"></div>
         </div>
 
         <div id="action-list" class="action-grid"></div>
 
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-to-intake" type="button">返回修改</button>
+          <button class="btn btn-secondary" id="go-history" type="button">查看历史处方</button>
+        </div>
+      </section>
+
+      <section id="page-history" class="page" aria-labelledby="history-title">
+        <div class="page-head">
+          <h2 id="history-title">历史处方</h2>
+          <p>按当前登录用户筛选并查看过往处方记录，便于回顾训练过程。</p>
+        </div>
+
         <div class="history-section card">
-          <h3>历史处方</h3>
+          <div class="history-toolbar">
+            <div>
+              <strong id="history-user-name">当前用户：未登录</strong>
+              <p class="hint" id="history-user-meta">登录后可查看该用户的历史处方</p>
+            </div>
+            <button class="btn btn-secondary" id="refresh-history" type="button">刷新历史</button>
+          </div>
           <div id="prescription-history" class="history-list">正在加载…</div>
         </div>
 
         <div class="page-actions">
-          <button class="btn btn-secondary" id="back-to-intake" type="button">返回修改</button>
+          <button class="btn btn-secondary" id="back-to-prescription" type="button">返回处方页</button>
         </div>
       </section>
 
@@ -117,7 +176,7 @@
             <canvas id="overlay" width="640" height="480"></canvas>
             <div class="video-placeholder" id="video-placeholder">
               <p>点击下方按钮启动摄像头</p>
-              <p class="hint">第二步将接入 MediaPipe 骨架绘制</p>
+              <p class="hint">将自动加载 MediaPipe 并实时绘制骨架</p>
             </div>
             <div class="feedback-overlay" id="feedback-overlay">等待检测…</div>
             <div class="score-badge" id="score-badge">-- 分</div>
@@ -131,7 +190,7 @@
             <ul class="feedback-list" id="feedback-list"></ul>
             <div class="training-actions">
               <button class="btn btn-primary" id="start-camera" type="button">启动摄像头</button>
-              <button class="btn btn-secondary" id="simulate-pose" type="button">模拟检测（Mock）</button>
+              <button class="btn btn-secondary" id="simulate-pose" type="button">单次检测</button>
               <button class="btn btn-secondary" id="stop-training" type="button">结束跟练</button>
             </div>
             <p class="hint" id="demo-hint"></p>
@@ -140,10 +199,17 @@
       </section>
     </main>
 
+    <div class="loading-overlay" id="loading-overlay" aria-hidden="true">
+      <div class="loading-card">
+        <div class="spinner"></div>
+        <p id="loading-text">正在处理…</p>
+      </div>
+    </div>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <script src="config.js"></script>
     <script src="mock.js"></script>
-    <script src="app.js"></script>
+    <script type="module" src="app.js"></script>
   </body>
 </html>

@@ -27,6 +27,19 @@
       "regression": "不适时减少侧屈幅度，保持轻微牵拉感即可。"
     },
     {
+      "id": "chin_tuck",
+      "name": "收下巴训练",
+      "target_conditions": ["颈椎病", "姿势不良", "头前伸"],
+      "body_regions": ["颈部"],
+      "sets": 3,
+      "reps": 10,
+      "frequency": "每日1-2次",
+      "description": "坐位或站位，双眼平视前方，下颌微收使后脑勺与衣领贴近，停留5-8秒后放松。",
+      "contraindications": "急性颈椎骨折、严重眩晕发作期暂停。",
+      "progression": "连续3天无疼痛加重后可增加保持时间。",
+      "regression": "出现不适时减少保持时间并放小动作幅度。"
+    },
+    {
       "id": "scapular_retraction",
       "name": "肩胛后缩训练",
       "target_conditions": ["肩颈疼痛", "圆肩", "姿势不良"],
@@ -53,17 +66,17 @@
       "regression": "先做坐姿挺胸呼吸训练。"
     },
     {
-      "id": "mckenzie_press_up",
-      "name": "麦肯基俯卧撑",
-      "target_conditions": ["腰椎间盘突出", "腰痛"],
+      "id": "cat_cow",
+      "name": "猫牛式脊柱松动",
+      "target_conditions": ["腰痛", "腰椎活动受限", "久坐僵硬"],
       "body_regions": ["腰部"],
-      "sets": 3,
-      "reps": 10,
-      "frequency": "每日1-2次",
-      "description": "俯卧位双手撑地，骨盆尽量贴近床面，缓慢伸直肘部抬起上半身，腰部保持可耐受的伸展。",
-      "contraindications": "伸展后腿痛加重、急性腰椎骨折、马尾综合征风险者禁忌。",
-      "progression": "若疼痛向腰部集中且无下肢症状加重，可逐步增加次数。",
-      "regression": "先从俯卧放松或肘撑俯卧开始。"
+      "sets": 2,
+      "reps": 8,
+      "frequency": "每日1次",
+      "description": "四点跪位，交替做脊柱屈曲与伸展，动作缓慢可控，用于改善腰椎活动度与核心控制。",
+      "contraindications": "腰椎间盘突出急性期疼痛明显时减量或暂停。",
+      "progression": "疼痛稳定后可增加动作次数。",
+      "regression": "先减小动作幅度，以舒适范围内活动。"
     },
     {
       "id": "pelvic_tilt",
@@ -155,6 +168,32 @@
       "contraindications": "医生限制主动收缩或急性损伤未评估时谨慎。",
       "progression": "收缩控制良好后进阶到直腿抬高。",
       "regression": "缩短保持时间。"
+    },
+    {
+      "id": "calf_stretch",
+      "name": "小腿后侧拉伸",
+      "target_conditions": ["踝关节活动受限", "跟腱紧张", "足底不适"],
+      "body_regions": ["踝关节"],
+      "sets": 3,
+      "reps": 2,
+      "frequency": "每日1次",
+      "description": "面对墙一步距离，后腿伸直脚跟贴地，身体前倾至小腿后侧有牵拉感，停留20秒。",
+      "contraindications": "跟腱急性断裂、踝部急性扭伤48小时内不宜。",
+      "progression": "可逐步延长保持时间到30秒。",
+      "regression": "减小前倾幅度。"
+    },
+    {
+      "id": "ankle_pump",
+      "name": "踝泵运动",
+      "target_conditions": ["踝关节活动受限", "术后肿胀", "久卧活动不足"],
+      "body_regions": ["踝关节"],
+      "sets": 3,
+      "reps": 20,
+      "frequency": "每日2次",
+      "description": "坐位或卧位，脚尖尽力背伸与跖屈，节律进行，促进下肢静脉回流与踝活动。",
+      "contraindications": "踝部骨折未固定、深静脉血栓未评估前慎用。",
+      "progression": "逐步增加节律和总次数。",
+      "regression": "减小踝关节活动范围。"
     },
     {
       "id": "shoulder_pendulum",
