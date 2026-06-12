@@ -5,124 +5,242 @@
 
 ## 1. 技术架构概述
 
-项目采用前后端分离架构：
+项目采用前后端分离架构，当前已经完成可运行的 MVP 链路：
 
-- 前端：静态页面 + JavaScript，负责用户输入、摄像头采集、展示结果。
-- 后端：FastAPI，负责REST API提供处方生成、姿势纠正等服务。
-- 数据存储：当前项目为MVP阶段，未引入数据库，后期建议采用关系型数据库（如PostgreSQL、MySQL）或轻量级SQLite。
-- AI/LLM层：当前后端接口为占位实现，未来可接入大模型推理服务或外部API。
+- 前端：静态 HTML + CSS + JavaScript，负责用户信息采集、康复处方展示、摄像头控制和动作反馈展示。
+- 后端：FastAPI，提供处方生成、动作知识库查询、姿态纠正、历史处方查询和大模型连通性测试接口。
+- 数据存储：SQLite + SQLAlchemy，保存处方、处方动作和姿态反馈记录。
+- 知识库：`knowledge/actions.json` 使用 JSON 结构化存储康复动作、适用症状、组数、频次、禁忌症和进阶/降阶规则。
+- AI/LLM 层：`backend/app/doubao.py` 通过火山方舟/豆包 OpenAI 兼容接口生成处方摘要，并在接口异常时使用本地安全兜底摘要。
+- 姿态纠正层：`backend/app/algorithms.py` 基于前端传入的姿态关键点计算角度和距离，返回动作反馈、评分和状态。
+
+整体调用链路：
+
+```text
+前端问诊表单
+  -> FastAPI /api/generate_prescription
+  -> 知识库检索候选动作
+  -> 组装提示词模板
+  -> 调用豆包大模型
+  -> 解析模型输出并保存 SQLite
+  -> 返回处方摘要与动作列表
+```
+
+姿态纠正链路：
+
+```text
+前端摄像头/模拟关键点
+  -> FastAPI /api/correct_pose
+  -> analyze_pose(action_id, keypoints, visibility)
+  -> 规则算法生成 feedback/score/status
+  -> 保存反馈记录并返回前端
+```
 
 ## 2. 系统组件
 
 ### 2.1 前端组件
 
-- `index.html`
-  - 页面结构：标题、问诊表单、摄像头预览、反馈结果区。
-  - 通过 `app.js` 与后端 API 交互。
+- `frontend/index.html`
+  - 包含用户信息采集、疼痛部位选择、活动度评分、处方展示、训练反馈页面。
+  - 提供摄像头区域和模拟姿态检测按钮。
 
-- `app.js`
-  - `generate_prescription`：向 `/api/generate_prescription` 发起 POST 请求。
-  - `startCam`：调用浏览器摄像头并输出到 `<video>`。
-  - `sendFrame`：采集当前帧并调用 `/api/correct_pose`。
+- `frontend/config.js`
+  - 配置 API 地址、Demo 模式、动作目录和动作 ID 映射。
+  - 可通过 `APP_CONFIG.setDemoMode(false); location.reload();` 切换到真实后端。
 
-- `style.css`
-  - 基础布局与样式，提供简洁可读的页面展示。
+- `frontend/app.js`
+  - 提交问诊信息到 `/api/generate_prescription`。
+  - 拉取历史处方 `/api/prescriptions`。
+  - 发送动作关键点到 `/api/correct_pose`。
+  - 渲染处方动作、反馈分数和动作状态。
+
+- `frontend/mock.js`
+  - Demo 模式下构造本地处方和模拟关键点。
+  - 后端不可用时提供兜底展示能力。
+
+- `frontend/style.css`
+  - 定义问诊、处方、训练反馈页面样式。
 
 ### 2.2 后端组件
 
 - `backend/app/main.py`
-  - 创建 FastAPI 应用实例。
-  - 注册 API 路由前缀 `/api`。
-  - 提供健康检查接口 `/health`。
+  - 创建 FastAPI 应用。
+  - 注册 CORS、API 路由和 `/health` 健康检查。
+  - 启动时初始化 SQLite 数据库。
 
 - `backend/app/api.py`
-  - 定义业务路由：
+  - 定义主要接口：
     - `POST /api/generate_prescription`
+    - `GET /api/prescriptions`
+    - `GET /api/prescriptions/{id}`
+    - `GET /api/actions`
     - `POST /api/correct_pose`
-  - 当前实现为占位版本，返回示例数据。
+    - `POST /api/test_doubao`
 
-- `backend/app/schema.py`
-  - 定义请求与响应数据模型：
-    - `PrescriptionRequest`
-    - `PrescriptionResponse`
-    - `PoseCorrectionRequest`
-    - `PoseCorrectionResponse`
+- `backend/app/crud.py`
+  - 实现处方生成、数据库写入、动作记录保存、姿态反馈保存。
+  - 根据用户主诉和疼痛部位从知识库中选择候选动作。
+
+- `backend/app/doubao.py`
+  - 自动读取根目录 `.env` 或 `backend/.env`。
+  - 调用豆包/火山方舟 OpenAI 兼容接口。
+  - 解析模型文本和 JSON 输出，敏感字段脱敏。
+  - API 异常时返回本地兜底处方摘要。
+
+- `backend/app/knowledge.py`
+  - 读取动作知识库和提示词模板。
+  - 根据症状关键词、疼痛部位和动作标签进行基础检索。
+  - 提供本地处方摘要渲染能力。
+
+- `backend/app/algorithms.py`
+  - 实现动作关键点分析。
+  - 当前支持 `neck_side_bend` 和 `wall_squat` 两类动作反馈。
+  - 使用 Python 标准库计算角度和距离，不依赖额外数学库。
 
 - `backend/app/models.py`
-  - 预留数据库模型位置。
-  - 当前未实现具体 ORM。
+  - 定义 SQLAlchemy ORM：
+    - `PrescriptionModel`
+    - `ActionModel`
+    - `PoseFeedbackModel`
 
-## 3. 类设计
+- `backend/app/schema.py`
+  - 定义请求/响应数据模型，用于参数校验和 Swagger 文档生成。
 
-### 3.1 后端类设计
+- `backend/app/database.py`
+  - 配置 SQLite 连接。
+  - 初始化表结构。
+  - 对开发阶段旧表自动补充 `raw_response` 字段。
+
+## 3. 数据模型设计
+
+### 3.1 PrescriptionModel
+
+保存一次康复处方生成记录：
+
+- `id`：处方 ID
+- `patient_name`：患者姓名
+- `patient_age`：患者年龄
+- `symptoms`：主诉
+- `history`：既往病史
+- `summary`：处方摘要
+- `raw_response`：大模型原始返回与解析结果
+- `created_at` / `updated_at`：记录时间
+
+### 3.2 ActionModel
+
+保存处方中推荐的动作：
+
+- `id`：动作记录 ID
+- `prescription_id`：所属处方
+- `name`：动作名称
+- `sets`：组数
+- `reps`：次数
+- `note`：动作说明或注意事项
+
+### 3.3 PoseFeedbackModel
+
+保存姿态纠正请求和反馈：
+
+- `id`：反馈记录 ID
+- `request_data`：动作 ID、关键点、可见度和时间戳
+- `feedback`：纠正建议列表
+- `created_at`：记录时间
+
+## 4. API 数据契约
+
+### 4.1 处方生成请求
 
 ```python
 class PrescriptionRequest(BaseModel):
-    name: Optional[str]
-    age: Optional[int]
+    name: Optional[str] = None
+    age: Optional[int] = None
     symptoms: str
-    history: Optional[str]
+    history: Optional[str] = None
+    pain_regions: Optional[List[str]] = None
+    mobility_score: Optional[int] = None
+```
 
+### 4.2 动作条目
+
+```python
 class ActionItem(BaseModel):
+    id: Optional[str] = None
     name: str
     sets: int
     reps: int
-    note: Optional[str]
+    note: Optional[str] = None
+    description: Optional[str] = None
+    frequency: Optional[str] = None
+    contraindications: Optional[str] = None
+    progression: Optional[str] = None
+    regression: Optional[str] = None
+    body_regions: Optional[List[str]] = None
+    target_conditions: Optional[List[str]] = None
+```
 
-class PrescriptionResponse(BaseModel):
-    summary: str
-    actions: List[ActionItem]
+### 4.3 姿态纠正请求与响应
 
+```python
 class PoseCorrectionRequest(BaseModel):
-    keypoints: Optional[List[List[float]]]
+    action_id: Optional[str] = None
+    keypoints: Optional[List[List[float]]] = None
+    visibility: Optional[List[float]] = None
+    timestamp: Optional[int] = None
 
 class PoseCorrectionResponse(BaseModel):
     feedback: List[str]
+    score: int = 0
+    status: str = "warning"
 ```
 
-这些类定义了后端 API 的输入输出契约，便于类型校验和自动生成文档。
+## 5. 知识库与提示词设计
 
-### 3.2 前端模块设计
+知识库位于 `knowledge/actions.json`，当前覆盖颈部、肩部、腰部、膝关节等常见康复场景。每个动作包含：
 
-前端主文件 `app.js` 的功能模块：
+- 动作 ID 和名称
+- 适用病症和身体部位
+- 组数、次数、频次
+- 动作描述
+- 禁忌症
+- 进阶条件
+- 降阶方案
 
-- `apiBase`：API 基础地址配置。
-- `submit` 按钮事件：负责发送问诊信息并显示返回结果。
-- 摄像头模块：
-  - `startCam`：请求视频权限并渲染视频流。
-  - `sendFrame`：将当前视频帧转换为图像，并发送矫正请求。
+提示词模板位于 `knowledge/prompt_template.txt`，将用户信息和知识库候选动作组织为上下文，并要求模型输出结构化 JSON，包含：
 
-后续可将前端逻辑拆分为：
-- `ui/form.js`：问诊表单模块
-- `ui/camera.js`：摄像头控制模块
-- `ui/result.js`：结果渲染模块
+- `summary`：总体康复目标和训练原则
+- `actions`：推荐动作列表
+- `warnings`：风险提示
+- `follow_up`：复查或调整建议
 
-## 4. 推荐架构扩展
+## 6. 部署与配置
 
-### 4.1 后端扩展
+后端使用 `.env` 配置豆包 API：
 
-- 引入数据库：使用 SQLAlchemy + Alembic 实现数据持久化。
-- 设计领域模型：
-  - Patient
-  - Prescription
-  - Action
-  - Therapist
-  - PoseFeedback
-- 增加服务层：将核心业务逻辑从路由中抽离。
-- 集成 LLM：封装 `LLMService`，负责提示词构建与调用。
+```env
+DOUBAO_API_KEY=your_api_key
+DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+DOUBAO_MODEL_ID=your_model_id
+```
 
-### 4.2 前端扩展
+`.env` 已加入 `.gitignore`，提交代码时只提交 `.env.sample`。
 
-- 使用现代框架：如 React、Vue 或 Svelte，实现组件化界面。
-- 引入状态管理：用于管理患者信息、处方结果、摄像头状态等。
-- 增加路由：支持登录、患者列表、康复记录、资源页面等。
+启动后端：
 
-### 4.3 部署架构
+```powershell
+cd backend
+..\.venv\Scripts\Activate.ps1
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-- 后端部署：FastAPI + Uvicorn 或 Gunicorn。
-- 前端部署：静态文件托管于 GitHub Pages、Vercel 或自建 Nginx。
-- 生产环境建议：使用反向代理（Nginx）、HTTPS、日志收集和监控。
+## 7. 后续扩展
 
-## 5. 总结
+- 引入 Alembic 管理数据库迁移。
+- 增加用户登录、患者档案和医生审核流程。
+- 接入 MediaPipe，在前端从真实视频流提取关键点。
+- 扩展更多动作算法和标准动作模板。
+- 增加自动化测试和接口回归测试脚本。
+- 增加处方导出、训练打卡、数据统计和可视化模块。
 
-当前项目为 MVP 原型，已具备基础前后端交互能力。后续应重点补全数据库、模型推理、用户管理和交互界面。
+## 8. 总结
+
+当前系统已完成可运行 MVP：前端可提交问诊信息，后端可基于知识库和豆包大模型生成康复处方，SQLite 可保存处方记录，姿态纠正接口可返回动作反馈、评分和状态。后续工作重点是完善真实视频关键点提取、增加测试覆盖和优化前端演示体验。
