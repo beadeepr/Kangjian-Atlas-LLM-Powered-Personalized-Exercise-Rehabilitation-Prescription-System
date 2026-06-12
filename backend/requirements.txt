@@ -3,5 +3,5 @@ uvicorn[standard]
 pydantic
 requests
 SQLAlchemy
-openai>=1.0.0
 numpy
+python-dotenv

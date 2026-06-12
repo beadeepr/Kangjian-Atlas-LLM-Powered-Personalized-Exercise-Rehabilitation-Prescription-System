@@ -13,6 +13,24 @@ from .schema import PrescriptionRequest, PrescriptionResponse, ActionItem, PoseC
 router = APIRouter()
 
 
+def action_response_items(actions):
+    from .knowledge import load_action_library
+
+    library_by_name = {item.name: item for item in load_action_library()}
+    result = []
+    for action in actions:
+        item = library_by_name.get(action.name)
+        if item:
+            data = item.model_dump() if hasattr(item, "model_dump") else item.dict()
+            data["sets"] = action.sets
+            data["reps"] = action.reps
+            data["note"] = action.note
+            result.append(data)
+        else:
+            result.append({"name": action.name, "sets": action.sets, "reps": action.reps, "note": action.note})
+    return result
+
+
 def get_db():
     db = SessionLocal()
     try:
@@ -40,10 +58,8 @@ def generate_prescription(req: PrescriptionRequest, db: Session = Depends(get_db
         patient_name=prescription.patient_name,
         patient_age=prescription.patient_age,
         summary=prescription.summary,
-        actions=[
-            {"name": action.name, "sets": action.sets, "reps": action.reps, "note": action.note}
-            for action in actions
-        ]
+        actions=action_response_items(actions),
+        raw_response=prescription.raw_response,
     )
 
 
@@ -58,10 +74,8 @@ def read_prescription(prescription_id: int, db: Session = Depends(get_db)):
         patient_name=prescription.patient_name,
         patient_age=prescription.patient_age,
         summary=prescription.summary,
-        actions=[
-            {"name": action.name, "sets": action.sets, "reps": action.reps, "note": action.note}
-            for action in actions
-        ]
+        actions=action_response_items(actions),
+        raw_response=prescription.raw_response,
     )
 
 
@@ -86,10 +100,8 @@ def list_prescriptions(db: Session = Depends(get_db)):
             patient_name=prescription.patient_name,
             patient_age=prescription.patient_age,
             summary=prescription.summary,
-            actions=[
-                {"name": action.name, "sets": action.sets, "reps": action.reps, "note": action.note}
-                for action in actions
-            ]
+            actions=action_response_items(actions),
+            raw_response=prescription.raw_response,
         ))
     return result
 
@@ -110,7 +122,12 @@ def test_doubao():
             age=30,
             symptoms="腰痛",
             history="无",
-            actions=["颈部拉伸", "靠墙静蹲"],
+            actions=[
+                {"id": "mckenzie_press_up", "name": "麦肯基俯卧撑", "sets": 3, "reps": 10},
+                {"id": "glute_bridge", "name": "臀桥训练", "sets": 3, "reps": 12},
+            ],
+            pain_regions=["腰部"],
+            mobility_score=5,
         )
         return {"status": "success", "summary": result}
     except DoubaoError as exc:

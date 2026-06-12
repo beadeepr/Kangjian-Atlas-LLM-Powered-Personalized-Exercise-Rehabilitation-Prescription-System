@@ -12,10 +12,18 @@ class PrescriptionRequest(BaseModel):
 
 
 class ActionItem(BaseModel):
+    id: Optional[str] = None
     name: str
     sets: int
     reps: int
-    note: Optional[str]
+    note: Optional[str] = None
+    description: Optional[str] = None
+    frequency: Optional[str] = None
+    contraindications: Optional[str] = None
+    progression: Optional[str] = None
+    regression: Optional[str] = None
+    body_regions: Optional[List[str]] = None
+    target_conditions: Optional[List[str]] = None
 
 
 class PrescriptionResponse(BaseModel):

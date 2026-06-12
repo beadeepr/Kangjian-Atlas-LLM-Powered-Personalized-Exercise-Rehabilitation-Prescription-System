@@ -2,6 +2,12 @@ from sqlalchemy.orm import Session
 from . import models, schema
 
 
+def _action_to_dict(action: schema.ActionItem):
+    if hasattr(action, "model_dump"):
+        return action.model_dump()
+    return action.dict()
+
+
 def get_actions_by_prescription(db: Session, prescription_id: int):
     return db.query(models.ActionModel).filter(models.ActionModel.prescription_id == prescription_id).all()
 
@@ -15,8 +21,8 @@ def list_prescriptions(db: Session):
 
 
 def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
-    from .knowledge import select_actions_for_prescription
-    from .doubao import generate_prescription_summary, DoubaoError
+    from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_prescription
+    from .doubao import generate_prescription_summary
 
     selected_actions = select_actions_for_prescription(
         symptoms=prescription.symptoms,
@@ -24,28 +30,33 @@ def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
         history=prescription.history,
         mobility_score=prescription.mobility_score,
     )
-    action_names = [action.name for action in selected_actions]
+    action_payload = [_action_to_dict(action) for action in selected_actions]
 
-    try:
-        result = generate_prescription_summary(
-            patient_name=prescription.name or "患者",
-            age=prescription.age,
-            symptoms=prescription.symptoms,
-            history=prescription.history,
-            actions=action_names,
-            pain_regions=prescription.pain_regions,
-            mobility_score=prescription.mobility_score,
-        )
-        if isinstance(result, dict):
-            summary = result.get('text') or f"基于主诉 {prescription.symptoms} 的康复处方。推荐动作：{'; '.join(action_names) or '暂无'}。"
-            raw_response = result.get('raw')
-        else:
-            summary = str(result)
-            raw_response = None
-    except DoubaoError:
-        # Fallback to basic summary if Doubao fails
-        summary = f"基于主诉 {prescription.symptoms} 的康复处方。推荐动作：{'; '.join(action_names) or '暂无'}。"
-        raw_response = None
+    result = generate_prescription_summary(
+        patient_name=prescription.name or "患者",
+        age=prescription.age,
+        symptoms=prescription.symptoms,
+        history=prescription.history,
+        actions=action_payload,
+        pain_regions=prescription.pain_regions,
+        mobility_score=prescription.mobility_score,
+        prompt_template=load_prompt_template(),
+    )
+    parsed = result.get("json") if isinstance(result, dict) else None
+    model_summary = parsed.get("summary") if isinstance(parsed, dict) else None
+    summary = model_summary or result.get("text") or render_prescription_summary(
+        name=prescription.name,
+        age=prescription.age,
+        symptoms=prescription.symptoms,
+        history=prescription.history,
+        actions=selected_actions,
+        mobility_score=prescription.mobility_score,
+    )
+    raw_response = {
+        "model_text": result.get("text"),
+        "model_json": parsed,
+        "raw": result.get("raw"),
+    } if isinstance(result, dict) else None
 
     db_prescription = models.PrescriptionModel(
         patient_name=prescription.name,
@@ -77,33 +88,39 @@ def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
 def create_pose_feedback(db: Session, request: schema.PoseCorrectionRequest):
     from .algorithms import analyze_pose
 
-    action_id = request.action_id or ""
-    keypoints = request.keypoints or []
-    visibility = request.visibility or []
-
-    if not keypoints or len(keypoints) < 33:
+    if not request.action_id:
         result = {
-            "feedback": ["请全身入镜，确保摄像头能拍到完整身体"],
+            "feedback": ["缺少动作类型，请先选择要跟练的动作。"],
             "score": 0,
             "status": "error",
         }
-    elif action_id not in {"wall_squat", "neck_side_bend"}:
+    elif not request.keypoints:
         result = {
-            "feedback": ["暂不支持该动作"],
+            "feedback": ["缺少姿态关键点，请重新采集视频帧。"],
+            "score": 0,
+            "status": "error",
+        }
+    elif len(request.keypoints) < 33:
+        result = {
+            "feedback": ["姿态关键点不足，请确保全身进入画面。"],
             "score": 0,
             "status": "error",
         }
     else:
-        result = analyze_pose(action_id, keypoints, visibility)
+        result = analyze_pose(
+            action_id=request.action_id,
+            keypoints=request.keypoints,
+            visibility=request.visibility or [1.0] * len(request.keypoints),
+        )
 
     db_feedback = models.PoseFeedbackModel(
         request_data={
-            "action_id": action_id,
-            "keypoints": keypoints,
-            "visibility": visibility,
+            "action_id": request.action_id,
+            "keypoints": request.keypoints,
+            "visibility": request.visibility,
             "timestamp": request.timestamp,
         },
-        feedback=result["feedback"],
+        feedback=result.get("feedback", [])
     )
     db.add(db_feedback)
     db.commit()

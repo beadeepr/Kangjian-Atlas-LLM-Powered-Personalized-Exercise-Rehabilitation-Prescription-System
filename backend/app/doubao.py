@@ -1,10 +1,18 @@
-import os
-from typing import Optional
 import json
+import os
+import re
+from pathlib import Path
+from typing import Any, Optional
+
 import requests
+from dotenv import load_dotenv
+
+BASE_DIR = Path(__file__).resolve().parents[2]
+load_dotenv(BASE_DIR / ".env")
+load_dotenv(BASE_DIR / "backend" / ".env")
 
 DOUBAO_API_KEY = os.getenv("DOUBAO_API_KEY")
-DOUBAO_BASE_URL = os.getenv("DOUBAO_BASE_URL")
+DOUBAO_BASE_URL = os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
 DOUBAO_MODEL_ID = os.getenv("DOUBAO_MODEL_ID")
 
 
@@ -12,7 +20,7 @@ class DoubaoError(Exception):
     pass
 
 
-def _headers():
+def _headers() -> dict[str, str]:
     if not DOUBAO_API_KEY:
         raise DoubaoError("Missing DOUBAO_API_KEY environment variable")
     return {
@@ -21,128 +29,136 @@ def _headers():
     }
 
 
-def generate_with_http(prompt: str, model_id: Optional[str] = None, timeout: int = 30) -> str:
-    """Generic HTTP fallback to call Doubao/Ark REST endpoint. Replace `invoke_path` if your region differs."""
-    if not DOUBAO_BASE_URL:
-        raise DoubaoError("Missing DOUBAO_BASE_URL environment variable")
+def _sanitize_payload(payload: Any) -> Any:
+    if isinstance(payload, dict):
+        sanitized = {}
+        for key, value in payload.items():
+            key_lower = key.lower()
+            if key_lower in {"authorization", "api_key", "apikey", "secret", "token", "signature"}:
+                sanitized[key] = "[REDACTED]"
+            elif isinstance(value, (dict, list)):
+                sanitized[key] = _sanitize_payload(value)
+            else:
+                sanitized[key] = value
+        return sanitized
+    if isinstance(payload, list):
+        return [_sanitize_payload(item) for item in payload]
+    return payload
+
+
+def _extract_chat_text(data: dict[str, Any]) -> str:
+    choices = data.get("choices") or []
+    if choices:
+        message = choices[0].get("message") or {}
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+    for key in ("output", "result", "response", "data"):
+        value = data.get(key)
+        if isinstance(value, str):
+            return value
+        if value is not None:
+            return json.dumps(value, ensure_ascii=False)
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
+    if not text:
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+    try:
+        parsed = json.loads(cleaned)
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        pass
+
+    match = re.search(r"\{.*\}", cleaned, flags=re.S)
+    if not match:
+        return None
+    try:
+        parsed = json.loads(match.group(0))
+        return parsed if isinstance(parsed, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def generate_with_http(prompt: str, model_id: Optional[str] = None, timeout: int = 30) -> dict[str, Any]:
     model = model_id or DOUBAO_MODEL_ID
     if not model:
         raise DoubaoError("Missing DOUBAO_MODEL_ID (or model_id argument)")
 
-    # NOTE: ensure this path matches the API in your account; adjust if needed
-    invoke_path = "/invoke"
-    url = DOUBAO_BASE_URL.rstrip("/") + invoke_path
-
+    url = f"{DOUBAO_BASE_URL.rstrip('/')}/chat/completions"
     payload = {
         "model": model,
-        "input": prompt,
-        # add other parameters if required by your API
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是谨慎的中文运动康复处方助手，必须优先保证安全并按要求输出。",
+            },
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.2,
     }
 
-    resp = requests.post(url, headers=_headers(), json=payload, timeout=timeout)
     try:
+        resp = requests.post(url, headers=_headers(), json=payload, timeout=timeout)
         resp.raise_for_status()
-    except requests.HTTPError as exc:
-        raise DoubaoError(f"HTTP error from Doubao: {resp.status_code} {resp.text}") from exc
+    except requests.RequestException as exc:
+        detail = getattr(exc.response, "text", str(exc))
+        raise DoubaoError(f"HTTP error from Doubao: {detail}") from exc
 
+    resp.encoding = "utf-8"
     try:
         data = resp.json()
-    except Exception:
-        # return both text and raw
-        return {"text": resp.text, "raw": resp.text}
+    except ValueError as exc:
+        raise DoubaoError("Doubao returned non-JSON response") from exc
 
-    # Attempt to extract text from common fields
-    extracted = None
-    if isinstance(data, dict):
-        for key in ("output", "result", "data", "choices", "response"):
-            if key in data:
-                val = data[key]
-                extracted = json.dumps(val, ensure_ascii=False) if not isinstance(val, str) else val
-                break
-    if extracted is None:
-        extracted = json.dumps(data, ensure_ascii=False)
-    return {"text": extracted, "raw": data}
+    text = _extract_chat_text(data)
+    return {
+        "text": text,
+        "json": _extract_json_object(text),
+        "raw": _sanitize_payload(data),
+    }
 
 
-def generate_summary(prompt: str, model_id: Optional[str] = None) -> str:
-    """Try to use the installed volcengine SDK (ARKApi). If that fails, fall back to HTTP requests."""
-    # Try SDK first
-    try:
-        from volcenginesdkark.api import ARKApi
-        # instantiate client (SDK uses environment configuration)
-        client = ARKApi()
-        # Attempt to call a synchronous/simple method if available.
-        # Many Ark endpoints are async (batch). We attempt create_batch_inference_job as best-effort.
-        payload = {
-            "foundationModel": {"model": model_id or DOUBAO_MODEL_ID},
-            "input": {"input": prompt}
-        }
-        # Some SDK variants accept dict directly; wrap in try/except
-        if hasattr(client, "create_batch_inference_job"):
-            resp = client.create_batch_inference_job(body=payload)
-            # try to extract text if possible, else return resp as raw
-            try:
-                # attempt to get dict-like representation
-                raw = resp if isinstance(resp, (dict, list)) else getattr(resp, '__dict__', str(resp))
-                text = str(resp)
-                return {"text": text, "raw": raw}
-            except Exception:
-                return {"text": str(resp), "raw": str(resp)}
-        # fallback to other available method names
-        if hasattr(client, "create_endpoint"):
-            resp = client.create_endpoint(body={"foundationModel": {"model": model_id or DOUBAO_MODEL_ID}})
-            return {"text": str(resp), "raw": resp}
-    except Exception:
-        # ignore SDK errors and try HTTP fallback
-        pass
-
-    # HTTP fallback
+def generate_summary(prompt: str, model_id: Optional[str] = None) -> dict[str, Any]:
     return generate_with_http(prompt, model_id=model_id)
+
+
 def generate_prescription_summary(
     patient_name: str,
     age: Optional[int],
     symptoms: str,
     history: Optional[str],
-    actions: list[str],
+    actions: list[dict[str, Any]],
     pain_regions: Optional[list[str]] = None,
     mobility_score: Optional[int] = None,
-) -> str:
-    """Generate prescription summary using Doubao/Ark. This wraps `generate_summary()` with a structured prompt and falls back to local summary on error."""
-    action_text = "；".join(actions) if actions else "暂未推荐具体动作"
-    age_text = str(age) if age is not None else "未知年龄"
-    history_text = history or "无"
+    prompt_template: Optional[str] = None,
+) -> dict[str, Any]:
+    from .knowledge import DEFAULT_PROMPT_TEMPLATE
 
-    pain_text = "、".join(pain_regions) if pain_regions else "未说明"
-    mobility_text = f"{mobility_score}/10" if mobility_score is not None else "未评估"
-
-    prompt = (
-        f"你是一名运动康复领域的专业助手。请根据以下已审核的问诊信息，"
-        f"撰写一段专业、谨慎、适合居家执行的康复处方摘要。\n"
-        f"患者姓名: {patient_name}\n"
-        f"年龄: {age_text}\n"
-        f"主诉: {symptoms}\n"
-        f"既往病史: {history_text}\n"
-        f"疼痛部位: {pain_text}\n"
-        f"活动度自评: {mobility_text}\n"
-        f"推荐动作: {action_text}\n"
-        f"\n"
-        f"输出要求：\n"
-        f"1. 使用规范中文，体现康复医学专业性；\n"
-        f"2. 说明训练目标、动作逻辑与循序渐进方案；\n"
-        f"3. 明确疼痛监测原则，出现剧烈疼痛需停止并就医；\n"
-        f"4. 不要编造诊断名称，不要替代医生面诊；\n"
-        f"5. 篇幅控制在150-250字。"
+    template = prompt_template or DEFAULT_PROMPT_TEMPLATE
+    prompt = template.format(
+        name=patient_name or "患者",
+        age=str(age) if age is not None else "未知年龄",
+        symptoms=symptoms,
+        history=history or "无",
+        pain_regions="、".join(pain_regions or []) or "未提供",
+        mobility_score=str(mobility_score) if mobility_score is not None else "未提供",
+        actions=json.dumps(actions, ensure_ascii=False, indent=2),
     )
 
     try:
-        result = generate_summary(prompt)
-        # result may be str or dict
-        if isinstance(result, dict):
-            return result
-        return {"text": result, "raw": None}
+        return generate_summary(prompt)
     except Exception:
-        # fallback returns text string
-        return {"text": _fallback_summary(patient_name, age, symptoms, history, actions), "raw": None}
+        return {
+            "text": _fallback_summary(patient_name, age, symptoms, history, actions, mobility_score),
+            "json": None,
+            "raw": None,
+        }
 
 
 def _fallback_summary(
@@ -150,22 +166,26 @@ def _fallback_summary(
     age: Optional[int],
     symptoms: str,
     history: Optional[str],
-    actions: list[str],
+    actions: list[dict[str, Any]],
+    mobility_score: Optional[int] = None,
 ) -> str:
-    """Fallback summary when Doubao API is unavailable."""
     patient_name = patient_name or "患者"
     age_text = str(age) if age is not None else "未知年龄"
     history_text = history or "无"
+    mobility_text = str(mobility_score) if mobility_score is not None else "未提供"
     action_text = (
-        "；".join(f"{action}（3组×1次）" for action in actions)
+        "；".join(
+            f"{action.get('name')}（{action.get('sets', 1)}组×{action.get('reps', 1)}次，{action.get('frequency', '按耐受频次')}）"
+            for action in actions
+        )
         if actions
         else "暂未推荐具体动作"
     )
 
     return (
         f"患者：{patient_name}，年龄：{age_text}。主诉：{symptoms}。既往病史：{history_text}。"
-        f"推荐康复训练包括：{action_text}。\n"
-        "训练目标：缓解症状、恢复功能、改善姿势，提升日常活动能力。\n"
-        "注意事项：训练前充分热身，保持呼吸平稳，避免突然用力。如出现剧烈疼痛或不适立即停止并咨询专业医师。\n"
-        "建议根据自身承受能力逐步增加强度，每周进行3-4次训练，并结合功能性恢复练习。"
+        f"活动度评分：{mobility_text}。推荐康复训练包括：{action_text}。\n"
+        "训练目标：缓解症状、恢复功能、改善姿势与核心稳定，提升日常活动能力。\n"
+        "注意事项：训练前热身，动作全程保持可耐受；若出现剧烈疼痛、麻木无力、头晕或症状加重，应立即停止并咨询医生。\n"
+        "进阶建议：连续3天训练后无疼痛加重，再逐步增加保持时间、次数或轻阻力。"
     )
