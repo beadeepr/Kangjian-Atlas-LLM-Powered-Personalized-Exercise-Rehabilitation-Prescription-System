@@ -50,6 +50,14 @@ npx http-server
 - 示例知识库存放在 `knowledge/actions.json`
 - 提示词模板在 `knowledge/prompt_template.txt`
 
+### 4. DeepSeek 集成（可选）
+
+- 将 DeepSeek API Key 配置到环境变量 `DEEPSEEK_API_KEY`
+- 可选配置 `DEEPSEEK_BASE_URL` 和 `DEEPSEEK_SEARCH_PATH`
+- 示例配置文件：`.env.sample`
+- 后端已新增 `POST /api/deepseek_search` 接口，用于调试 DeepSeek 检索结果
+- 生成处方时会尝试调用 DeepSeek 检索，结果会整合进处方摘要
+
 ---
 
 ## 📁 项目结构

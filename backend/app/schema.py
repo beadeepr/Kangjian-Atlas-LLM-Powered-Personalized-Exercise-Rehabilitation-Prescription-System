@@ -17,6 +17,9 @@ class ActionItem(BaseModel):
 
 
 class PrescriptionResponse(BaseModel):
+    id: Optional[int] = None
+    patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
     summary: str
     actions: List[ActionItem]
 

@@ -11,9 +11,17 @@
 
     <section id="form">
       <h2>问诊表单</h2>
+      <label>姓名<input id="name" type="text" placeholder="请输入患者姓名" /></label>
+      <label>年龄<input id="age" type="number" placeholder="请输入患者年龄" /></label>
       <label>主诉<textarea id="symptoms"></textarea></label>
+      <label>既往病史<textarea id="history"></textarea></label>
       <button id="submit">生成处方</button>
       <pre id="result"></pre>
+    </section>
+
+    <section id="prescriptionHistory">
+      <h2>历史处方</h2>
+      <div id="prescriptionList">正在加载...</div>
     </section>
 
     <section id="camera">

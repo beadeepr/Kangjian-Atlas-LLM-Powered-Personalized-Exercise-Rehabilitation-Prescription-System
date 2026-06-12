@@ -10,17 +10,41 @@ def get_prescription(db: Session, prescription_id: int):
     return db.query(models.PrescriptionModel).filter(models.PrescriptionModel.id == prescription_id).first()
 
 
+def list_prescriptions(db: Session):
+    return db.query(models.PrescriptionModel).order_by(models.PrescriptionModel.created_at.desc()).all()
+
+
 def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
-    from .knowledge import load_action_library
+    from .knowledge import load_action_library, render_prescription_summary
+    from .deepseek import extract_titles, search_deepseek, DeepSeekError
 
     actions = load_action_library()
     selected_actions = [action for action in actions if action.reps > 0][:3]
+
+    deepseek_summary = None
+    try:
+        result = search_deepseek(prescription.symptoms, top_k=3)
+        titles = extract_titles(result)
+        if titles:
+            deepseek_summary = "；".join(titles)
+    except DeepSeekError:
+        deepseek_summary = None
+
+    summary = render_prescription_summary(
+        name=prescription.name,
+        age=prescription.age,
+        symptoms=prescription.symptoms,
+        history=prescription.history,
+        actions=selected_actions,
+        deepseek_summary=deepseek_summary,
+    )
+
     db_prescription = models.PrescriptionModel(
         patient_name=prescription.name,
         patient_age=prescription.age,
         symptoms=prescription.symptoms,
         history=prescription.history,
-        summary=f"基于主诉 {prescription.symptoms} 的初步康复处方"
+        summary=summary
     )
     db.add(db_prescription)
     db.commit()
