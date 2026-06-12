@@ -1,7 +1,7 @@
 import { PoseTracker } from "./pose.js";
 
 const state = {
-  currentStep: "intake",
+  currentStep: "login",
   prescription: null,
   currentAction: null,
   cameraStream: null,
@@ -11,11 +11,21 @@ const state = {
   pendingPosePayload: null,
   lastPoseSentAt: 0,
   autoPoseEnabled: false,
+  currentUser: null,
 };
 
 const els = {
   stepButtons: () => document.querySelectorAll(".step-item"),
   pages: () => document.querySelectorAll(".page"),
+  loginForm: document.getElementById("login-form"),
+  loginName: document.getElementById("login-name"),
+  loginAge: document.getElementById("login-age"),
+  loginNameError: document.getElementById("login-name-error"),
+  loginAgeError: document.getElementById("login-age-error"),
+  userIdentity: document.getElementById("user-identity"),
+  userAvatar: document.getElementById("user-avatar"),
+  userDisplayName: document.getElementById("user-display-name"),
+  userDisplayAge: document.getElementById("user-display-age"),
   painRegions: document.getElementById("pain-regions"),
   mobilityScore: document.getElementById("mobility-score"),
   mobilityValue: document.getElementById("mobility-value"),
@@ -26,6 +36,10 @@ const els = {
   prescriptionSummary: document.getElementById("prescription-summary"),
   actionList: document.getElementById("action-list"),
   prescriptionHistory: document.getElementById("prescription-history"),
+  historyUserName: document.getElementById("history-user-name"),
+  historyUserMeta: document.getElementById("history-user-meta"),
+  doubaoResultPanel: document.getElementById("doubao-result-panel"),
+  doubaoResult: document.getElementById("doubao-result"),
   loadingOverlay: document.getElementById("loading-overlay"),
   loadingText: document.getElementById("loading-text"),
   trainingActionName: document.getElementById("training-action-name"),
@@ -65,9 +79,20 @@ function goToStep(step) {
   els.stepButtons().forEach((button) => {
     const isCurrent = button.dataset.step === step;
     button.classList.toggle("active", isCurrent);
-    button.disabled = step === "intake" ? button.dataset.step !== "intake" : false;
+    const targetStep = button.dataset.step;
+    if (targetStep === "login") {
+      button.disabled = false;
+    } else if (!state.currentUser) {
+      button.disabled = true;
+    } else if (targetStep === "prescription") {
+      button.disabled = !state.prescription;
+    } else if (targetStep === "training") {
+      button.disabled = !state.currentAction;
+    } else {
+      button.disabled = false;
+    }
   });
-  if (step === "prescription") {
+  if (step === "history") {
     loadPrescriptionHistory();
   }
 }
@@ -85,13 +110,40 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = window.APP_CONFIG
 function readFormData() {
   const formData = new FormData(els.intakeForm);
   return {
-    name: formData.get("name")?.toString().trim() || null,
-    age: formData.get("age") ? Number(formData.get("age")) : null,
+    name: state.currentUser?.name || null,
+    age: state.currentUser?.age || null,
     symptoms: formData.get("symptoms")?.toString().trim() || "",
     history: formData.get("history")?.toString().trim() || null,
     pain_regions: Array.from(state.selectedPainRegions),
     mobility_score: Number(formData.get("mobility_score") || 5),
   };
+}
+
+function readLoginData() {
+  const formData = new FormData(els.loginForm);
+  return {
+    name: formData.get("login_name")?.toString().trim() || "",
+    age: formData.get("login_age") ? Number(formData.get("login_age")) : null,
+  };
+}
+
+function validateLoginForm(loginData) {
+  let valid = true;
+  if (!loginData.name) {
+    els.loginNameError.textContent = "请输入姓名";
+    valid = false;
+  } else {
+    els.loginNameError.textContent = "";
+  }
+
+  if (!loginData.age || loginData.age < 1 || loginData.age > 120) {
+    els.loginAgeError.textContent = "请输入有效年龄";
+    valid = false;
+  } else {
+    els.loginAgeError.textContent = "";
+  }
+
+  return valid;
 }
 
 const MEDICAL_HINTS = [
@@ -173,6 +225,51 @@ function formatSummary(summary) {
     .join("");
 }
 
+function showDoubaoResult(content) {
+  els.doubaoResultPanel.hidden = false;
+  if (typeof content === "string") {
+    els.doubaoResult.textContent = content;
+    return;
+  }
+  els.doubaoResult.textContent = JSON.stringify(content, null, 2);
+}
+
+function hideDoubaoResult() {
+  els.doubaoResultPanel.hidden = true;
+  els.doubaoResult.textContent = "";
+}
+
+function persistCurrentUser() {
+  if (!state.currentUser) return;
+  localStorage.setItem("kj_current_user", JSON.stringify(state.currentUser));
+}
+
+function loadPersistedUser() {
+  const raw = localStorage.getItem("kj_current_user");
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function updateUserIdentity() {
+  if (!state.currentUser) {
+    els.userIdentity.hidden = true;
+    els.historyUserName.textContent = "当前用户：未登录";
+    els.historyUserMeta.textContent = "登录后可查看该用户的历史处方";
+    return;
+  }
+
+  els.userIdentity.hidden = false;
+  els.userDisplayName.textContent = state.currentUser.name;
+  els.userDisplayAge.textContent = `${state.currentUser.age} 岁`;
+  els.userAvatar.textContent = state.currentUser.name.slice(0, 1);
+  els.historyUserName.textContent = `当前用户：${state.currentUser.name}`;
+  els.historyUserMeta.textContent = `年龄：${state.currentUser.age} 岁`;
+}
+
 function renderHistoryCard(prescription) {
   const header = [
     prescription.patient_name ? `患者：${prescription.patient_name}` : "",
@@ -205,17 +302,24 @@ async function loadPrescriptionHistory() {
     els.prescriptionHistory.textContent = "Demo 模式下不加载历史处方。";
     return;
   }
+  if (!state.currentUser) {
+    els.prescriptionHistory.textContent = "请先登录后再查看历史处方。";
+    return;
+  }
 
   els.prescriptionHistory.textContent = "正在加载…";
   try {
     const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/prescriptions`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    if (!Array.isArray(data) || data.length === 0) {
+    const filtered = Array.isArray(data)
+      ? data.filter((item) => item.patient_name === state.currentUser.name)
+      : [];
+    if (filtered.length === 0) {
       els.prescriptionHistory.textContent = "暂无处方记录。";
       return;
     }
-    els.prescriptionHistory.innerHTML = data.map(renderHistoryCard).join("");
+    els.prescriptionHistory.innerHTML = filtered.map(renderHistoryCard).join("");
   } catch (error) {
     const hint =
       error?.name === "AbortError"
@@ -278,6 +382,7 @@ function renderPrescription(prescription) {
   els.actionList.innerHTML = "";
 
   prescription.actions.forEach((action) => {
+    const poseSupported = window.APP_CONFIG.isPoseSupported(action.id);
     const card = document.createElement("article");
     card.className = "action-card card";
     card.innerHTML = `
@@ -287,6 +392,9 @@ function renderPrescription(prescription) {
         <div class="action-meta">
           <span class="tag">${action.sets} 组</span>
           <span class="tag">${action.reps} 次/组</span>
+          <span class="tag ${poseSupported ? "tag-supported" : "tag-pending"}">
+            ${poseSupported ? "支持实时纠正" : "暂不支持实时纠正"}
+          </span>
         </div>
         <p>${action.description || "按医嘱缓慢完成动作，注意呼吸节奏。"}</p>
         ${
@@ -299,9 +407,16 @@ function renderPrescription(prescription) {
             ? `<p class="hint"><strong>禁忌：</strong>${action.contraindications}</p>`
             : ""
         }
-        <button class="btn btn-primary start-training" type="button" data-action-id="${action.id || ""}">
+        ${
+          poseSupported
+            ? `<button class="btn btn-primary start-training" type="button" data-action-id="${action.id || ""}">
           开始跟练
+        </button>`
+            : `<button class="btn btn-secondary unsupported-training" type="button" data-action-id="${action.id || ""}">
+          仅查看处方
         </button>
+        <p class="hint support-hint">当前版本实时纠正仅支持“靠墙静蹲”和“颈部侧屈拉伸”。</p>`
+        }
       </div>
     `;
     els.actionList.appendChild(card);
@@ -316,6 +431,12 @@ function renderPrescription(prescription) {
         return;
       }
       startTraining(action);
+    });
+  });
+
+  els.actionList.querySelectorAll(".unsupported-training").forEach((button) => {
+    button.addEventListener("click", () => {
+      showToast("该动作暂不支持实时纠正，可先参考处方说明完成训练。");
     });
   });
 }
@@ -426,6 +547,10 @@ async function pumpPoseCorrection() {
 }
 
 function startTraining(action) {
+  if (!window.APP_CONFIG.isPoseSupported(action.id)) {
+    showToast("该动作暂不支持实时纠正，请选择支持的动作进行跟练。");
+    return;
+  }
   state.currentAction = action;
   els.trainingActionName.textContent = `${action.name} · ${action.sets} 组 × ${action.reps} 次`;
   els.feedbackOverlay.textContent = "等待检测…";
@@ -531,11 +656,17 @@ async function testDoubaoConnection() {
     const data = await response.json();
     if (data.status === "success") {
       showToast("豆包连接成功，摘要已生成");
-      window.alert(`豆包测试成功：\n\n${data.summary}`);
+      const summaryContent =
+        typeof data.summary === "string"
+          ? data.summary
+          : data.summary?.text || data.summary?.summary || data.summary;
+      showDoubaoResult(summaryContent);
     } else {
+      showDoubaoResult(data);
       showToast(`豆包连接失败：${data.detail || "未知错误"}`);
     }
   } catch (error) {
+    showDoubaoResult({ error: "豆包测试请求失败，请检查后端与环境变量" });
     showToast("豆包测试请求失败，请检查后端与环境变量");
   } finally {
     setLoading(false);
@@ -570,6 +701,17 @@ function updateModeBadge() {
 }
 
 function bindEvents() {
+  els.loginForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const loginData = readLoginData();
+    if (!validateLoginForm(loginData)) return;
+    state.currentUser = loginData;
+    persistCurrentUser();
+    updateUserIdentity();
+    showToast(`欢迎你，${loginData.name}`);
+    goToStep("intake");
+  });
+
   els.mobilityScore.addEventListener("input", (event) => {
     els.mobilityValue.textContent = event.target.value;
   });
@@ -625,10 +767,20 @@ function bindEvents() {
   document.getElementById("back-to-intake").addEventListener("click", () => {
     goToStep("intake");
   });
+  document.getElementById("go-history").addEventListener("click", () => {
+    goToStep("history");
+  });
+  document.getElementById("back-to-prescription").addEventListener("click", () => {
+    goToStep("prescription");
+  });
+  document.getElementById("refresh-history").addEventListener("click", () => {
+    loadPrescriptionHistory();
+  });
 
   document.getElementById("start-camera").addEventListener("click", startCamera);
   document.getElementById("simulate-pose").addEventListener("click", simulatePoseDetection);
   document.getElementById("test-doubao").addEventListener("click", testDoubaoConnection);
+  document.getElementById("clear-doubao-result").addEventListener("click", hideDoubaoResult);
   document.getElementById("toggle-demo").addEventListener("click", () => {
     window.APP_CONFIG.setDemoMode(!window.APP_CONFIG.DEMO_MODE);
     location.reload();
@@ -642,6 +794,7 @@ function bindEvents() {
     button.addEventListener("click", () => {
       if (button.disabled) return;
       const step = button.dataset.step;
+      if (step !== "login" && !state.currentUser) return;
       if (step === "training" && !state.currentAction) return;
       if (step === "prescription" && !state.prescription) return;
       goToStep(step);
@@ -656,11 +809,19 @@ function initDemoHint() {
 }
 
 function init() {
+  state.currentUser = loadPersistedUser();
   initPainRegions();
   bindEvents();
   initDemoHint();
   updateModeBadge();
-  goToStep("intake");
+  updateUserIdentity();
+  if (state.currentUser) {
+    els.loginName.value = state.currentUser.name;
+    els.loginAge.value = state.currentUser.age;
+    goToStep("intake");
+  } else {
+    goToStep("login");
+  }
 }
 
 init();

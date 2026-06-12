@@ -20,6 +20,7 @@ window.APP_CONFIG = {
   PRESCRIPTION_TIMEOUT_MS: 30000,
   POSE_TIMEOUT_MS: 2000,
   POSE_SEND_INTERVAL_MS: 100,
+  SUPPORTED_POSE_ACTION_IDS: ["wall_squat", "neck_side_bend"],
   assetUrl(path) {
     return new URL(path, window.location.href).href;
   },
@@ -27,6 +28,10 @@ window.APP_CONFIG = {
     localStorage.setItem("kj_demo_mode", enabled ? "true" : "false");
     this.DEMO_MODE = enabled;
   },
+};
+
+window.APP_CONFIG.isPoseSupported = function isPoseSupported(actionId) {
+  return this.SUPPORTED_POSE_ACTION_IDS.includes(actionId);
 };
 
 window.ACTION_CATALOG = {

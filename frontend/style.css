@@ -71,6 +71,44 @@ textarea {
   flex-wrap: wrap;
 }
 
+.user-identity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid rgba(26, 115, 232, 0.1);
+  box-shadow: 0 8px 18px rgba(43, 81, 130, 0.08);
+}
+
+.user-avatar {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--primary), var(--cyan));
+}
+
+.user-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-meta strong {
+  font-size: 0.96rem;
+  color: #143665;
+}
+
+.user-meta span {
+  color: var(--muted);
+  font-size: 0.84rem;
+}
+
 .mode-badge {
   padding: 6px 10px;
   border-radius: 999px;
@@ -202,6 +240,38 @@ textarea {
   font-weight: 600;
 }
 
+.result-panel {
+  margin-bottom: 18px;
+  padding: 18px 20px;
+}
+
+.result-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.result-panel-head h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #102a56;
+}
+
+.result-block {
+  margin: 12px 0 0;
+  padding: 16px;
+  border-radius: 16px;
+  border: 1px solid rgba(26, 115, 232, 0.1);
+  background: #0f172a;
+  color: #e6edf7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
 .summary-block {
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.95), rgba(238, 248, 255, 0.92));
@@ -227,6 +297,14 @@ textarea {
   border-radius: 24px;
   box-shadow: var(--shadow);
   backdrop-filter: blur(16px);
+}
+
+.login-card {
+  max-width: 560px;
+  margin: 0 auto;
+  padding: 26px;
+  display: grid;
+  gap: 18px;
 }
 
 .form-grid {
@@ -437,6 +515,20 @@ textarea {
   border-radius: 999px;
   font-size: 0.85rem;
   font-weight: 600;
+}
+
+.tag-supported {
+  background: rgba(52, 168, 83, 0.12);
+  color: #137333;
+}
+
+.tag-pending {
+  background: rgba(249, 171, 0, 0.14);
+  color: #9a6700;
+}
+
+.support-hint {
+  margin-top: auto;
 }
 
 .training-layout {
@@ -689,6 +781,15 @@ textarea {
     padding-bottom: 4px;
   }
 
+  .user-identity,
+  .history-toolbar {
+    width: 100%;
+  }
+
+  .history-toolbar {
+    flex-direction: column;
+  }
+
   .step-item,
   .btn-small {
     white-space: nowrap;
@@ -726,6 +827,14 @@ textarea {
 .history-section {
   margin-top: 20px;
   padding: 18px 20px;
+}
+
+.history-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
 }
 
 .history-section h3 {
