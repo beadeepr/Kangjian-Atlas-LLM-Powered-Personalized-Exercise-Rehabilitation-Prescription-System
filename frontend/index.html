@@ -3,36 +3,147 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>康健图谱 - 示例前端</title>
+    <title>康健图谱 - 个性化运动康复处方</title>
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
-    <h1>康健图谱（示例前端）</h1>
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-icon">康</span>
+        <div>
+          <h1>康健图谱</h1>
+          <p class="subtitle">个性化运动康复处方生成系统</p>
+        </div>
+      </div>
+      <nav class="step-nav" aria-label="流程步骤">
+        <button class="step-item active" data-step="intake" type="button">1 问诊</button>
+        <button class="step-item" data-step="prescription" type="button" disabled>2 处方</button>
+        <button class="step-item" data-step="training" type="button" disabled>3 跟练</button>
+      </nav>
+    </header>
 
-    <section id="form">
-      <h2>问诊表单</h2>
-      <label>姓名<input id="name" type="text" placeholder="请输入患者姓名" /></label>
-      <label>年龄<input id="age" type="number" placeholder="请输入患者年龄" /></label>
-      <label>主诉<textarea id="symptoms"></textarea></label>
-      <label>既往病史<textarea id="history"></textarea></label>
-      <button id="submit">生成处方</button>
-      <pre id="result"></pre>
-    </section>
+    <main class="app-main">
+      <section id="page-intake" class="page active" aria-labelledby="intake-title">
+        <div class="page-head">
+          <h2 id="intake-title">康复问诊</h2>
+          <p>请填写伤病信息与活动情况，系统将生成个性化康复处方。</p>
+        </div>
 
-    <section id="prescriptionHistory">
-      <h2>历史处方</h2>
-      <div id="prescriptionList">正在加载...</div>
-    </section>
+        <form id="intake-form" class="card form-grid" novalidate>
+          <div class="field">
+            <label for="name">姓名</label>
+            <input id="name" name="name" type="text" placeholder="选填" />
+          </div>
 
-    <section id="camera">
-      <h2>摄像头实时（示例）</h2>
-      <video id="video" autoplay playsinline width="480" height="360"></video>
-      <canvas id="canvas" width="480" height="360" style="display:none"></canvas>
-      <div id="feedback"></div>
-      <button id="startCam">启动摄像头</button>
-      <button id="sendFrame">发送帧进行纠正（示例）</button>
-    </section>
+          <div class="field">
+            <label for="age">年龄</label>
+            <input id="age" name="age" type="number" min="1" max="120" placeholder="选填" />
+          </div>
 
+          <div class="field field-full">
+            <label for="symptoms">主诉 <span class="required">*</span></label>
+            <textarea
+              id="symptoms"
+              name="symptoms"
+              rows="3"
+              placeholder="例如：颈部疼痛两周，转头受限，久坐后加重"
+              required
+            ></textarea>
+            <span class="field-error" id="symptoms-error"></span>
+          </div>
+
+          <div class="field field-full">
+            <label for="history">伤病史</label>
+            <textarea
+              id="history"
+              name="history"
+              rows="2"
+              placeholder="例如：一年前曾有腰肌劳损，长期伏案工作"
+            ></textarea>
+          </div>
+
+          <fieldset class="field field-full pain-field">
+            <legend>疼痛部位</legend>
+            <div class="chip-group" id="pain-regions"></div>
+          </fieldset>
+
+          <div class="field field-full">
+            <label for="mobility-score">
+              活动度自评
+              <span class="score-value" id="mobility-value">5</span>/10
+            </label>
+            <input id="mobility-score" name="mobility_score" type="range" min="1" max="10" value="5" />
+            <div class="range-labels">
+              <span>活动困难</span>
+              <span>活动自如</span>
+            </div>
+          </div>
+
+          <div class="form-actions field-full">
+            <button class="btn btn-primary" id="submit-prescription" type="submit">
+              生成康复处方
+            </button>
+          </div>
+        </form>
+      </section>
+
+      <section id="page-prescription" class="page" aria-labelledby="prescription-title">
+        <div class="page-head">
+          <h2 id="prescription-title">您的康复处方</h2>
+          <p id="prescription-summary" class="summary-text"></p>
+        </div>
+
+        <div id="action-list" class="action-grid"></div>
+
+        <div class="history-section card">
+          <h3>历史处方</h3>
+          <div id="prescription-history" class="history-list">正在加载…</div>
+        </div>
+
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-to-intake" type="button">返回修改</button>
+        </div>
+      </section>
+
+      <section id="page-training" class="page" aria-labelledby="training-title">
+        <div class="page-head">
+          <h2 id="training-title">实时动作纠正</h2>
+          <p id="training-action-name" class="summary-text"></p>
+        </div>
+
+        <div class="training-layout card">
+          <div class="video-shell" id="video-shell">
+            <video id="video" autoplay playsinline muted></video>
+            <canvas id="overlay" width="640" height="480"></canvas>
+            <div class="video-placeholder" id="video-placeholder">
+              <p>点击下方按钮启动摄像头</p>
+              <p class="hint">第二步将接入 MediaPipe 骨架绘制</p>
+            </div>
+            <div class="feedback-overlay" id="feedback-overlay">等待检测…</div>
+            <div class="score-badge" id="score-badge">-- 分</div>
+          </div>
+
+          <aside class="training-side">
+            <div class="status-panel" id="status-panel">
+              <span class="status-dot" id="status-dot"></span>
+              <span id="status-text">未开始</span>
+            </div>
+            <ul class="feedback-list" id="feedback-list"></ul>
+            <div class="training-actions">
+              <button class="btn btn-primary" id="start-camera" type="button">启动摄像头</button>
+              <button class="btn btn-secondary" id="simulate-pose" type="button">模拟检测（Mock）</button>
+              <button class="btn btn-secondary" id="stop-training" type="button">结束跟练</button>
+            </div>
+            <p class="hint" id="demo-hint"></p>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="config.js"></script>
+    <script src="mock.js"></script>
     <script src="app.js"></script>
   </body>
 </html>
