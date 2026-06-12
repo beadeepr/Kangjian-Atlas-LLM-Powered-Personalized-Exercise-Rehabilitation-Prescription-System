@@ -100,21 +100,11 @@ Kangjian-Atlas-LLM-Powered-Personalized-Exercise-Rehabilitation-Prescription-Sys
 
 （待补充）
 
----
 
-## 📞 联系方式
 
-有任何问题或建议，请通过以下方式联系项目负责人：
 
-- **Github/Gitee**：beadeepr
-- **邮箱**：（待补充）
 
----
 
-## 📄 许可证
 
-（待补充）
-
----
 
 *最后更新：2026-06-12*
