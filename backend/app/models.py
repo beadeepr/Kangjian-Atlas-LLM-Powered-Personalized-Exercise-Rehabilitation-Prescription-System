@@ -19,6 +19,7 @@ class PrescriptionModel(Base):
     symptoms = Column(Text, nullable=False)
     history = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
+    raw_response = Column(JSON, nullable=True)
     created_at = Column(DateTime, default=now)
     updated_at = Column(DateTime, default=now, onupdate=now)
 

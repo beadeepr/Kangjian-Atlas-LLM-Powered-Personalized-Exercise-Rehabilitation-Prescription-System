@@ -27,7 +27,7 @@ def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
     action_names = [action.name for action in selected_actions]
 
     try:
-        summary = generate_prescription_summary(
+        result = generate_prescription_summary(
             patient_name=prescription.name or "患者",
             age=prescription.age,
             symptoms=prescription.symptoms,
@@ -36,16 +36,24 @@ def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
             pain_regions=prescription.pain_regions,
             mobility_score=prescription.mobility_score,
         )
+        if isinstance(result, dict):
+            summary = result.get('text') or f"基于主诉 {prescription.symptoms} 的康复处方。推荐动作：{'; '.join(action_names) or '暂无'}。"
+            raw_response = result.get('raw')
+        else:
+            summary = str(result)
+            raw_response = None
     except DoubaoError:
         # Fallback to basic summary if Doubao fails
         summary = f"基于主诉 {prescription.symptoms} 的康复处方。推荐动作：{'; '.join(action_names) or '暂无'}。"
+        raw_response = None
 
     db_prescription = models.PrescriptionModel(
         patient_name=prescription.name,
         patient_age=prescription.age,
         symptoms=prescription.symptoms,
         history=prescription.history,
-        summary=summary
+        summary=summary,
+        raw_response=raw_response
     )
     db.add(db_prescription)
     db.commit()
