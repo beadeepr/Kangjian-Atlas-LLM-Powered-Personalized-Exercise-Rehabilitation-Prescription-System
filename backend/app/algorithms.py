@@ -181,27 +181,63 @@ def _check_mckenzie_press_up(keypoints: List[List[float]]) -> Dict[str, Any]:
     return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
 
 def _check_pelvic_tilt(keypoints: List[List[float]]) -> Dict[str, Any]:
-    # 骨盆后倾：仰卧位，看腰背是否贴地（通过关键点 z 轴深度或 y 轴相对位置）
-    # 简化：看髋部和肩部的相对位置变化
-    feedback = ["请收紧腹部，让腰背部轻轻压向床面。"]
-    return {"feedback": feedback, "score": 90, "status": "ok"}
+    # 骨盆后倾：仰卧位。比较髋部(ASIS)与肩部在垂直方向(y)的相对位置，并结合膝盖弯曲程度。
+    shoulder_mid_y = (keypoints[11][1] + keypoints[12][1]) / 2
+    hip_mid_y = (keypoints[23][1] + keypoints[24][1]) / 2
+    knee_mid_y = (keypoints[25][1] + keypoints[26][1]) / 2
+    
+    feedback = []
+    score = 100
+    
+    # 简单判定：如果髋部和肩部几乎在同一水平线，且膝盖弯曲，通常处于准备或完成状态
+    # 真正的后倾很难仅凭 2D/3D 点精确捕捉，这里主要提示用户感受腹部发力
+    if abs(hip_mid_y - shoulder_mid_y) < 0.1:
+        feedback.append("请呼气，收紧腹部，感觉腰背向下压向床面。")
+    else:
+        feedback.append("保持仰卧姿势，专注于骨盆的微小转动。")
+        
+    return {"feedback": feedback, "score": score, "status": "ok"}
 
 def _check_bird_dog(keypoints: List[List[float]]) -> Dict[str, Any]:
-    # 鸟狗式：对侧手脚伸直，身体呈一条直线
-    # 检查：手腕、肩膀、髋部、脚踝是否在一条线上
-    shoulder = keypoints[11]
-    hip = keypoints[23]
-    ankle = keypoints[27]
+    # 鸟狗式：四点跪姿，对侧手脚伸直。检查肩膀连线是否水平，以及抬起的手脚是否达到一定高度。
+    left_shoulder = keypoints[11]
+    right_shoulder = keypoints[12]
+    left_hip = keypoints[23]
+    right_hip = keypoints[24]
     
-    # 简单线性判定：肩膀和脚踝的连线是否经过髋部附近
-    feedback = ["保持背部平直，像一张桌子一样稳定。"]
-    return {"feedback": feedback, "score": 90, "status": "ok"}
+    # 计算肩膀连线的倾斜角
+    delta_y = left_shoulder[1] - right_shoulder[1]
+    delta_x = left_shoulder[0] - right_shoulder[0]
+    tilt_angle = np.degrees(np.arctan2(delta_y, delta_x)) if abs(delta_x) > 0.01 else 0
+    
+    feedback = []
+    score = 100
+    
+    # 如果肩膀倾斜超过 10 度，说明核心不稳
+    if abs(tilt_angle) > 10:
+        feedback.append("身体有些歪斜，请收紧核心，保持背部像桌子一样平。")
+        score -= 20
+    else:
+        feedback.append("保持平衡，手臂和腿向远处延伸。")
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
 
 def _check_dead_bug(keypoints: List[List[float]]) -> Dict[str, Any]:
-    # 死虫式：仰卧，四肢运动，腰部不离地
-    feedback = ["动作过程中请确保下背部始终紧贴地面。"]
-    return {"feedback": feedback, "score": 90, "status": "ok"}
-
+    # 死虫式：仰卧，四肢运动。重点监测腰部是否离开地面。通过比较腰部关键点(如髋部)与肩部/膝部的相对深度(z)或高度(y)。
+    hip_mid_z = (keypoints[23][2] + keypoints[24][2]) / 2
+    shoulder_mid_z = (keypoints[11][2] + keypoints[12][2]) / 2
+    
+    feedback = []
+    score = 100
+    
+    # 在 MediaPipe 中，z 轴表示深度。如果腰部(z)明显小于肩部(z)，说明腰拱起来了
+    if hip_mid_z > shoulder_mid_z + 0.05: 
+        feedback.append("注意！腰部拱起了，请用力将肚脐拉向脊柱，贴紧地面。")
+        score -= 30
+    else:
+        feedback.append("很好，保持下背部紧贴地面，缓慢交替手脚。")
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
 def _check_glute_bridge(keypoints: List[List[float]]) -> Dict[str, Any]:
     # 臀桥：髋部抬起，肩髋膝一线
     shoulder_y = (keypoints[11][1] + keypoints[12][1]) / 2
@@ -223,7 +259,6 @@ def _check_glute_bridge(keypoints: List[List[float]]) -> Dict[str, Any]:
 # --- 膝关节动作 ---
 
 def _check_wall_squat(keypoints: List[List[float]]) -> Dict[str, Any]:
-    # ... (保留之前的靠墙静蹲逻辑) ...
     hip_l = keypoints[23]
     knee_l = keypoints[25]
     ankle_l = keypoints[27]
@@ -260,16 +295,45 @@ def _check_straight_leg_raise(keypoints: List[List[float]]) -> Dict[str, Any]:
     return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
 
 def _check_quad_set(keypoints: List[List[float]]) -> Dict[str, Any]:
-    # 股四头肌等长收缩：主要是肌肉发力，视觉上变化不大
-    feedback = ["绷紧大腿前侧肌肉，用力向下压毛巾/床面。"]
-    return {"feedback": feedback, "score": 100, "status": "ok"}
+    # 股四头肌等长收缩：坐姿或仰卧，膝下垫毛巾。监测膝关节角度是否保持在接近 180 度的伸直状态。
+    hip = keypoints[23]
+    knee = keypoints[25]
+    ankle = keypoints[27]
+    
+    knee_angle = calculate_angle(hip, knee, ankle)
+    feedback = []
+    score = 100
+    
+    # 要求膝关节完全伸直 (接近 180 度)
+    if knee_angle < 165:
+        feedback.append("请将腿完全伸直，绷紧大腿前侧肌肉。")
+        score -= 20
+    else:
+        feedback.append("保持腿部伸直，用力向下压毛巾，坚持 5 秒。")
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
 
 # --- 肩部动作 ---
 
 def _check_shoulder_pendulum(keypoints: List[List[float]]) -> Dict[str, Any]:
-    # 钟摆运动：检测手臂是否有规律的摆动
-    feedback = ["身体前倾，利用惯性让手臂自然画圈。"]
-    return {"feedback": feedback, "score": 100, "status": "ok"}
+    # 钟摆运动：身体前倾，手臂自然下垂画圈。检测手腕关键点相对于肩膀的位移幅度。
+    wrist = keypoints[15] # 以左手为例
+    shoulder = keypoints[11]
+    
+    # 计算手腕到肩膀的距离
+    dist = calculate_distance(wrist, shoulder)
+    
+    feedback = []
+    score = 100
+    
+    # 钟摆运动要求手臂放松，距离应接近臂长。如果距离过短，说明用户在用力缩臂
+    if dist < 0.3: # 归一化距离
+        feedback.append("请放松肩膀，让手臂像钟摆一样自然摆动，不要用力。")
+        score -= 15
+    else:
+        feedback.append("利用身体的惯性带动画圈，动作要轻柔。")
+        
+    return {"feedback": feedback, "score": score, "status": "ok"}
 
 def _check_shoulder_external_rotation(keypoints: List[List[float]]) -> Dict[str, Any]:
     # 肩外旋：大臂夹紧身体，小臂向外转动
