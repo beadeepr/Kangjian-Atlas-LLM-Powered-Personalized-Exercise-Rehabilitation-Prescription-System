@@ -4,6 +4,7 @@ const state = {
   currentAction: null,
   cameraStream: null,
   selectedPainRegions: new Set(),
+  auth: readStoredAuth(),
 };
 
 const els = {
@@ -28,7 +29,65 @@ const els = {
   feedbackList: document.getElementById("feedback-list"),
   demoHint: document.getElementById("demo-hint"),
   toast: document.getElementById("toast"),
+  authForm: document.getElementById("auth-form"),
+  authAccount: document.getElementById("auth-account"),
+  authPassword: document.getElementById("auth-password"),
+  authNickname: document.getElementById("auth-nickname"),
+  authGender: document.getElementById("auth-gender"),
+  authAge: document.getElementById("auth-age"),
+  authStatus: document.getElementById("auth-status"),
+  loginButton: document.getElementById("login-button"),
+  registerButton: document.getElementById("register-button"),
+  logoutButton: document.getElementById("logout-button"),
 };
+
+function readStoredAuth() {
+  try {
+    return JSON.parse(localStorage.getItem("kj_auth") || "null");
+  } catch (error) {
+    return null;
+  }
+}
+
+function saveAuth(auth) {
+  state.auth = auth;
+  if (auth) {
+    localStorage.setItem("kj_auth", JSON.stringify(auth));
+  } else {
+    localStorage.removeItem("kj_auth");
+  }
+  updateAuthStatus();
+}
+
+function authHeaders(extra = {}) {
+  return state.auth?.token
+    ? { ...extra, Authorization: `Bearer ${state.auth.token}` }
+    : extra;
+}
+
+function requireLogin() {
+  if (window.APP_CONFIG.DEMO_MODE || state.auth?.token) {
+    return true;
+  }
+  showToast("请先登录后再使用真实后端服务");
+  return false;
+}
+
+function updateAuthStatus() {
+  if (!els.authStatus) return;
+  if (window.APP_CONFIG.DEMO_MODE) {
+    els.authStatus.textContent = "Demo 模式";
+    els.logoutButton.disabled = true;
+    return;
+  }
+  if (state.auth?.user) {
+    els.authStatus.textContent = `已登录：${state.auth.user.nickname}`;
+    els.logoutButton.disabled = false;
+  } else {
+    els.authStatus.textContent = "未登录";
+    els.logoutButton.disabled = true;
+  }
+}
 
 function showToast(message) {
   els.toast.textContent = message;
@@ -123,9 +182,16 @@ async function loadPrescriptionHistory() {
   }
 
   els.prescriptionHistory.textContent = "正在加载…";
+  if (!requireLogin()) {
+    els.prescriptionHistory.textContent = "请先登录后查看历史处方。";
+    return;
+  }
   try {
     const response = await fetchWithTimeout(
-      `${window.APP_CONFIG.API_BASE}/prescriptions`
+      `${window.APP_CONFIG.API_BASE}/prescriptions`,
+      {
+        headers: authHeaders(),
+      }
     );
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -149,18 +215,23 @@ async function requestPrescription(formData) {
   if (window.APP_CONFIG.DEMO_MODE) {
     return window.MockService.buildMockPrescription(formData);
   }
+  if (!requireLogin()) {
+    return null;
+  }
 
   try {
     const response = await fetchWithTimeout(
       `${window.APP_CONFIG.API_BASE}/generate_prescription`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: authHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           name: formData.name,
           age: formData.age,
           symptoms: formData.symptoms,
           history: formData.history,
+          pain_regions: formData.pain_regions,
+          mobility_score: formData.mobility_score,
         }),
       }
     );
@@ -177,6 +248,60 @@ async function requestPrescription(formData) {
   } catch (error) {
     showToast("处方服务暂不可用，已切换为本地 Mock 数据");
     return window.MockService.buildMockPrescription(formData);
+  }
+}
+
+function readAuthForm() {
+  return {
+    account: els.authAccount.value.trim(),
+    password: els.authPassword.value.trim(),
+    nickname: els.authNickname.value.trim(),
+    gender: els.authGender.value || null,
+    age: els.authAge.value ? Number(els.authAge.value) : null,
+  };
+}
+
+async function submitAuth(mode) {
+  if (window.APP_CONFIG.DEMO_MODE) {
+    showToast("Demo 模式无需登录");
+    return;
+  }
+  const form = readAuthForm();
+  if (!form.account || !form.password) {
+    showToast("请填写账号和密码");
+    return;
+  }
+  if (mode === "register" && !form.nickname) {
+    showToast("注册时请填写昵称");
+    return;
+  }
+
+  const url = `${window.APP_CONFIG.API_BASE}/${mode === "register" ? "register" : "login"}`;
+  const body =
+    mode === "register"
+      ? form
+      : { account: form.account, password: form.password };
+
+  try {
+    const response = await fetchWithTimeout(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.detail || `HTTP ${response.status}`);
+    }
+    if (mode === "register") {
+      showToast("注册成功，请登录");
+      els.authNickname.value = data.nickname || form.nickname;
+      return;
+    }
+    saveAuth({ token: data.token, user: data.user });
+    showToast("登录成功");
+    loadPrescriptionHistory();
+  } catch (error) {
+    showToast(error.message || "账号服务暂不可用");
   }
 }
 
@@ -400,6 +525,9 @@ function bindEvents() {
 
     try {
       const prescription = await requestPrescription(formData);
+      if (!prescription) {
+        return;
+      }
       state.prescription = prescription;
       renderPrescription(prescription);
       goToStep("prescription");
@@ -418,6 +546,13 @@ function bindEvents() {
   document.getElementById("stop-training").addEventListener("click", () => {
     stopCamera();
     goToStep("prescription");
+  });
+  els.loginButton.addEventListener("click", () => submitAuth("login"));
+  els.registerButton.addEventListener("click", () => submitAuth("register"));
+  els.logoutButton.addEventListener("click", () => {
+    saveAuth(null);
+    els.prescriptionHistory.textContent = "请先登录后查看历史处方。";
+    showToast("已退出登录");
   });
 
   els.stepButtons().forEach((button) => {
@@ -441,6 +576,7 @@ function init() {
   initPainRegions();
   bindEvents();
   initDemoHint();
+  updateAuthStatus();
   goToStep("intake");
 }
 

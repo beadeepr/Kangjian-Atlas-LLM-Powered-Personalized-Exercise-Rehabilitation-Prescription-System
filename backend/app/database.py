@@ -24,6 +24,8 @@ def _ensure_sqlite_columns():
     statements = []
     if "raw_response" not in columns:
         statements.append("ALTER TABLE prescriptions ADD COLUMN raw_response JSON")
+    if "user_id" not in columns:
+        statements.append("ALTER TABLE prescriptions ADD COLUMN user_id INTEGER")
 
     if not statements:
         return
