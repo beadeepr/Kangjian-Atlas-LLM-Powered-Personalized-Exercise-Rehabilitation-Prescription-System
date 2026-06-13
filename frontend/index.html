@@ -20,12 +20,12 @@
           <span class="user-avatar" id="user-avatar">康</span>
           <div class="user-meta">
             <strong id="user-display-name">未登录</strong>
-            <span id="user-display-age">年龄未填写</span>
           </div>
         </div>
         <span class="mode-badge demo" id="mode-badge">Demo 模式</span>
         <button class="btn btn-secondary btn-small" id="toggle-demo" type="button">切换 API 模式</button>
         <button class="btn btn-secondary btn-small" id="test-doubao" type="button">测试豆包</button>
+        <button class="btn btn-secondary btn-small" id="logout-button" type="button" hidden>退出登录</button>
       </div>
       <nav class="step-nav" aria-label="流程步骤">
         <button class="step-item active" data-step="login" type="button">1 登录</button>
@@ -34,22 +34,6 @@
         <button class="step-item" data-step="history" type="button" disabled>4 历史</button>
         <button class="step-item" data-step="training" type="button" disabled>5 跟练</button>
       </nav>
-      <form id="auth-form" class="auth-panel" autocomplete="off">
-        <input id="auth-account" name="account" type="text" placeholder="账号" />
-        <input id="auth-password" name="password" type="password" placeholder="密码" />
-        <input id="auth-nickname" name="nickname" type="text" placeholder="昵称" />
-        <select id="auth-gender" name="gender" aria-label="性别">
-          <option value="">性别</option>
-          <option value="男">男</option>
-          <option value="女">女</option>
-          <option value="其他">其他</option>
-        </select>
-        <input id="auth-age" name="age" type="number" min="1" max="120" placeholder="年龄" />
-        <button class="btn btn-secondary" id="login-button" type="button">登录</button>
-        <button class="btn btn-primary" id="register-button" type="button">注册</button>
-        <button class="btn btn-secondary" id="logout-button" type="button">退出</button>
-        <span id="auth-status" class="auth-status">未登录</span>
-      </form>
     </header>
 
     <main class="app-main">
@@ -65,26 +49,72 @@
       <section id="page-login" class="page active" aria-labelledby="login-title">
         <div class="page-head">
           <h2 id="login-title">用户登录</h2>
-          <p>请先填写基本信息，用于区分不同用户的处方与历史记录。</p>
+          <p id="login-subtitle">请先注册或登录账号，登录后方可进入问诊。</p>
         </div>
 
-        <form id="login-form" class="card login-card" novalidate>
-          <div class="field">
-            <label for="login-name">姓名 <span class="required">*</span></label>
-            <input id="login-name" name="login_name" type="text" placeholder="例如：张三" required />
-            <span class="field-error" id="login-name-error"></span>
+        <div id="api-login-panel">
+          <div class="auth-tabs" role="tablist" aria-label="登录方式">
+            <button class="auth-tab active" type="button" data-auth-tab="login" role="tab" aria-selected="true">登录</button>
+            <button class="auth-tab" type="button" data-auth-tab="register" role="tab" aria-selected="false">注册</button>
           </div>
 
-          <div class="field">
-            <label for="login-age">年龄 <span class="required">*</span></label>
-            <input id="login-age" name="login_age" type="number" min="1" max="120" placeholder="例如：32" required />
-            <span class="field-error" id="login-age-error"></span>
+          <div id="auth-login-wrap" class="card login-card auth-panel-wrap">
+            <h3 class="auth-panel-title">账号登录</h3>
+            <form id="auth-login-form" novalidate>
+              <div class="field">
+                <label for="auth-account">账号 <span class="required">*</span></label>
+                <input id="auth-account" name="account" type="text" placeholder="例如：zhangsan" autocomplete="username" required />
+                <span class="field-error" id="auth-account-error"></span>
+              </div>
+              <div class="field">
+                <label for="auth-password">密码 <span class="required">*</span></label>
+                <input id="auth-password" name="password" type="password" placeholder="至少 6 位" autocomplete="current-password" required />
+                <span class="field-error" id="auth-password-error"></span>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">登录并进入问诊</button>
+              </div>
+            </form>
           </div>
 
-          <div class="form-actions">
-            <button class="btn btn-primary" id="login-submit" type="submit">进入问诊</button>
+          <div id="auth-register-wrap" class="card login-card auth-panel-wrap" hidden>
+            <h3 class="auth-panel-title">注册账号</h3>
+            <form id="auth-register-form" novalidate>
+              <div class="field">
+                <label for="auth-register-account">账号 <span class="required">*</span></label>
+                <input id="auth-register-account" name="account" type="text" placeholder="例如：zhangsan" autocomplete="username" required />
+                <span class="field-error" id="auth-register-account-error"></span>
+              </div>
+              <div class="field">
+                <label for="auth-register-password">密码 <span class="required">*</span></label>
+                <input id="auth-register-password" name="password" type="password" placeholder="至少 6 位" autocomplete="new-password" required />
+                <span class="field-error" id="auth-register-password-error"></span>
+              </div>
+              <div class="field">
+                <label for="auth-nickname">姓名 <span class="required">*</span></label>
+                <input id="auth-nickname" name="nickname" type="text" placeholder="例如：张三" required />
+                <span class="field-error" id="auth-nickname-error"></span>
+              </div>
+              <div class="field">
+                <label for="auth-age">年龄 <span class="required">*</span></label>
+                <input id="auth-age" name="age" type="number" min="1" max="120" placeholder="例如：32" required />
+                <span class="field-error" id="auth-age-error"></span>
+              </div>
+              <div class="field">
+                <label for="auth-gender">性别</label>
+                <select id="auth-gender" name="gender" aria-label="性别">
+                  <option value="">未填写</option>
+                  <option value="男">男</option>
+                  <option value="女">女</option>
+                  <option value="其他">其他</option>
+                </select>
+              </div>
+              <div class="form-actions">
+                <button class="btn btn-primary" type="submit">注册并进入问诊</button>
+              </div>
+            </form>
           </div>
-        </form>
+        </div>
       </section>
 
       <section id="page-intake" class="page" aria-labelledby="intake-title">
@@ -209,7 +239,6 @@
               <button class="btn btn-secondary" id="simulate-pose" type="button">单次检测</button>
               <button class="btn btn-secondary" id="stop-training" type="button">结束跟练</button>
             </div>
-            <p class="hint" id="demo-hint"></p>
           </aside>
         </div>
       </section>

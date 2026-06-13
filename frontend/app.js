@@ -12,20 +12,22 @@ const state = {
   lastPoseSentAt: 0,
   autoPoseEnabled: false,
   currentUser: null,
+  auth: null,
+  authTab: "login",
 };
 
 const els = {
   stepButtons: () => document.querySelectorAll(".step-item"),
   pages: () => document.querySelectorAll(".page"),
-  loginForm: document.getElementById("login-form"),
-  loginName: document.getElementById("login-name"),
-  loginAge: document.getElementById("login-age"),
-  loginNameError: document.getElementById("login-name-error"),
-  loginAgeError: document.getElementById("login-age-error"),
+  apiLoginPanel: document.getElementById("api-login-panel"),
+  authLoginWrap: document.getElementById("auth-login-wrap"),
+  authRegisterWrap: document.getElementById("auth-register-wrap"),
+  authLoginForm: document.getElementById("auth-login-form"),
+  authRegisterForm: document.getElementById("auth-register-form"),
+  authTabs: () => document.querySelectorAll(".auth-tab"),
   userIdentity: document.getElementById("user-identity"),
   userAvatar: document.getElementById("user-avatar"),
   userDisplayName: document.getElementById("user-display-name"),
-  userDisplayAge: document.getElementById("user-display-age"),
   painRegions: document.getElementById("pain-regions"),
   mobilityScore: document.getElementById("mobility-score"),
   mobilityValue: document.getElementById("mobility-value"),
@@ -52,18 +54,15 @@ const els = {
   statusDot: document.getElementById("status-dot"),
   statusText: document.getElementById("status-text"),
   feedbackList: document.getElementById("feedback-list"),
-  demoHint: document.getElementById("demo-hint"),
   modeBadge: document.getElementById("mode-badge"),
   toast: document.getElementById("toast"),
-  authForm: document.getElementById("auth-form"),
   authAccount: document.getElementById("auth-account"),
   authPassword: document.getElementById("auth-password"),
+  authRegisterAccount: document.getElementById("auth-register-account"),
+  authRegisterPassword: document.getElementById("auth-register-password"),
   authNickname: document.getElementById("auth-nickname"),
   authGender: document.getElementById("auth-gender"),
   authAge: document.getElementById("auth-age"),
-  authStatus: document.getElementById("auth-status"),
-  loginButton: document.getElementById("login-button"),
-  registerButton: document.getElementById("register-button"),
   logoutButton: document.getElementById("logout-button"),
 };
 
@@ -79,10 +78,27 @@ function saveAuth(auth) {
   state.auth = auth;
   if (auth) {
     localStorage.setItem("kj_auth", JSON.stringify(auth));
+    syncCurrentUserFromAuth();
   } else {
     localStorage.removeItem("kj_auth");
   }
   updateAuthStatus();
+}
+
+function syncCurrentUserFromAuth() {
+  if (!state.auth?.user) return;
+  state.currentUser = {
+    id: state.auth.user.id,
+    account: state.auth.user.account,
+    name: state.auth.user.nickname,
+    age: state.auth.user.age ?? null,
+    gender: state.auth.user.gender ?? null,
+  };
+  updateUserIdentity();
+}
+
+function isSessionReady() {
+  return Boolean(state.auth?.token);
 }
 
 function authHeaders(extra = {}) {
@@ -92,27 +108,159 @@ function authHeaders(extra = {}) {
 }
 
 function requireLogin() {
-  if (window.APP_CONFIG.DEMO_MODE || state.auth?.token) {
+  if (isSessionReady()) {
     return true;
   }
-  showToast("请先登录后再使用真实后端服务");
+  showToast("请先登录或注册后再继续");
+  goToStep("login");
   return false;
 }
 
 function updateAuthStatus() {
-  if (!els.authStatus) return;
-  if (window.APP_CONFIG.DEMO_MODE) {
-    els.authStatus.textContent = "Demo 模式";
-    els.logoutButton.disabled = true;
-    return;
+  const loggedIn = isSessionReady();
+  if (els.logoutButton) {
+    els.logoutButton.hidden = !loggedIn;
   }
-  if (state.auth?.user) {
-    els.authStatus.textContent = `已登录：${state.auth.user.nickname}`;
-    els.logoutButton.disabled = false;
-  } else {
-    els.authStatus.textContent = "未登录";
-    els.logoutButton.disabled = true;
+  updateUserIdentity();
+}
+
+function switchAuthTab(tab) {
+  state.authTab = tab;
+  els.authTabs().forEach((button) => {
+    const active = button.dataset.authTab === tab;
+    button.classList.toggle("active", active);
+    button.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  if (els.authLoginWrap) els.authLoginWrap.hidden = tab !== "login";
+  if (els.authRegisterWrap) els.authRegisterWrap.hidden = tab !== "register";
+}
+
+function clearAuthErrors() {
+  [
+    "auth-account-error",
+    "auth-password-error",
+    "auth-register-account-error",
+    "auth-register-password-error",
+    "auth-nickname-error",
+    "auth-age-error",
+  ].forEach((id) => {
+    const node = document.getElementById(id);
+    if (node) node.textContent = "";
+  });
+}
+
+function readAuthPayload(mode) {
+  if (mode === "login") {
+    const formData = new FormData(els.authLoginForm);
+    return {
+      account: formData.get("account")?.toString().trim() || "",
+      password: formData.get("password")?.toString() || "",
+    };
   }
+
+  const formData = new FormData(els.authRegisterForm);
+  const ageValue = formData.get("age");
+  return {
+    account: formData.get("account")?.toString().trim() || "",
+    password: formData.get("password")?.toString() || "",
+    nickname: formData.get("nickname")?.toString().trim() || "",
+    gender: formData.get("gender")?.toString().trim() || null,
+    age: ageValue ? Number(ageValue) : null,
+  };
+}
+
+function validateAuthPayload(mode, payload) {
+  clearAuthErrors();
+  let valid = true;
+
+  const setError = (id, message) => {
+    const node = document.getElementById(id);
+    if (node) node.textContent = message;
+    valid = false;
+  };
+
+  if (!payload.account) {
+    setError(mode === "login" ? "auth-account-error" : "auth-register-account-error", "请输入账号");
+  }
+  if (!payload.password) {
+    setError(mode === "login" ? "auth-password-error" : "auth-register-password-error", "请输入密码");
+  } else if (payload.password.length < 6) {
+    setError(mode === "login" ? "auth-password-error" : "auth-register-password-error", "密码至少 6 位");
+  }
+  if (mode === "register" && !payload.nickname) {
+    setError("auth-nickname-error", "请输入姓名");
+  }
+  if (mode === "register" && (payload.age == null || payload.age < 1 || payload.age > 120)) {
+    setError("auth-age-error", "请输入有效年龄");
+  }
+
+  return valid;
+}
+
+async function submitAuth(mode) {
+  const payload = readAuthPayload(mode);
+  if (!validateAuthPayload(mode, payload)) return;
+
+  const endpoint = mode === "login" ? "login" : "register";
+  setLoading(true, mode === "login" ? "正在登录…" : "正在注册…");
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/${endpoint}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      const detail = await parseApiError(response);
+      showToast(typeof detail === "string" ? detail : "账号或密码错误");
+      return;
+    }
+
+    if (mode === "register") {
+      showToast("注册成功，正在自动登录…");
+      const loginResponse = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/login`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          account: payload.account,
+          password: payload.password,
+        }),
+      });
+      if (!loginResponse.ok) {
+        switchAuthTab("login");
+        if (els.authAccount) els.authAccount.value = payload.account;
+        showToast("注册成功，请手动登录");
+        return;
+      }
+      const loginData = await loginResponse.json();
+      saveAuth({ token: loginData.token, user: loginData.user });
+      showToast(`欢迎你，${loginData.user.nickname}`);
+      goToStep("intake");
+      return;
+    }
+
+    saveAuth({ token: data.token, user: data.user });
+    showToast(`欢迎你，${data.user.nickname}`);
+    goToStep("intake");
+  } catch (error) {
+    showToast(error?.name === "AbortError" ? "登录请求超时，请确认后端已启动" : "登录失败，请检查后端服务");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function logoutSession() {
+  saveAuth(null);
+  state.currentUser = null;
+  state.prescription = null;
+  state.currentAction = null;
+  stopCamera();
+  updateUserIdentity();
+  if (els.prescriptionHistory) {
+    els.prescriptionHistory.textContent = "请先登录后再查看历史处方。";
+  }
+  goToStep("login");
+  showToast("已退出登录");
 }
 
 function showToast(message) {
@@ -140,7 +288,7 @@ function goToStep(step) {
     const targetStep = button.dataset.step;
     if (targetStep === "login") {
       button.disabled = false;
-    } else if (!state.currentUser) {
+    } else if (!isSessionReady()) {
       button.disabled = true;
     } else if (targetStep === "prescription") {
       button.disabled = !state.prescription;
@@ -150,6 +298,7 @@ function goToStep(step) {
       button.disabled = false;
     }
   });
+  updateUserIdentity();
   if (step === "history") {
     loadPrescriptionHistory();
   }
@@ -175,33 +324,6 @@ function readFormData() {
     pain_regions: Array.from(state.selectedPainRegions),
     mobility_score: Number(formData.get("mobility_score") || 5),
   };
-}
-
-function readLoginData() {
-  const formData = new FormData(els.loginForm);
-  return {
-    name: formData.get("login_name")?.toString().trim() || "",
-    age: formData.get("login_age") ? Number(formData.get("login_age")) : null,
-  };
-}
-
-function validateLoginForm(loginData) {
-  let valid = true;
-  if (!loginData.name) {
-    els.loginNameError.textContent = "请输入姓名";
-    valid = false;
-  } else {
-    els.loginNameError.textContent = "";
-  }
-
-  if (!loginData.age || loginData.age < 1 || loginData.age > 120) {
-    els.loginAgeError.textContent = "请输入有效年龄";
-    valid = false;
-  } else {
-    els.loginAgeError.textContent = "";
-  }
-
-  return valid;
 }
 
 const MEDICAL_HINTS = [
@@ -297,35 +419,23 @@ function hideDoubaoResult() {
   els.doubaoResult.textContent = "";
 }
 
-function persistCurrentUser() {
-  if (!state.currentUser) return;
-  localStorage.setItem("kj_current_user", JSON.stringify(state.currentUser));
-}
-
-function loadPersistedUser() {
-  const raw = localStorage.getItem("kj_current_user");
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return null;
-  }
-}
-
 function updateUserIdentity() {
-  if (!state.currentUser) {
+  const onLoginPage = state.currentStep === "login";
+
+  if (!isSessionReady() || !state.currentUser || onLoginPage) {
     els.userIdentity.hidden = true;
     els.historyUserName.textContent = "当前用户：未登录";
-    els.historyUserMeta.textContent = "登录后可查看该用户的历史处方";
+    els.historyUserMeta.textContent = "登录后可查看该账号的历史处方";
     return;
   }
 
   els.userIdentity.hidden = false;
   els.userDisplayName.textContent = state.currentUser.name;
-  els.userDisplayAge.textContent = `${state.currentUser.age} 岁`;
   els.userAvatar.textContent = state.currentUser.name.slice(0, 1);
   els.historyUserName.textContent = `当前用户：${state.currentUser.name}`;
-  els.historyUserMeta.textContent = `年龄：${state.currentUser.age} 岁`;
+  els.historyUserMeta.textContent = state.currentUser.age
+    ? `年龄：${state.currentUser.age} 岁`
+    : "年龄未填写";
 }
 
 function renderHistoryCard(prescription) {
@@ -356,37 +466,33 @@ function renderHistoryCard(prescription) {
 }
 
 async function loadPrescriptionHistory() {
-  if (window.APP_CONFIG.DEMO_MODE) {
-    els.prescriptionHistory.textContent = "Demo 模式下不加载历史处方。";
-    return;
-  }
-  if (!state.currentUser) {
+  if (!requireLogin()) {
     els.prescriptionHistory.textContent = "请先登录后再查看历史处方。";
     return;
   }
 
   els.prescriptionHistory.textContent = "正在加载…";
-  if (!requireLogin()) {
-    els.prescriptionHistory.textContent = "请先登录后查看历史处方。";
-    return;
-  }
   try {
-    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/prescriptions`);
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/prescriptions`, {
+      headers: authHeaders(),
+    });
+    if (response.status === 401) {
+      logoutSession();
+      els.prescriptionHistory.textContent = "登录已过期，请重新登录。";
+      return;
+    }
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
-    const filtered = Array.isArray(data)
-      ? data.filter((item) => item.patient_name === state.currentUser.name)
-      : [];
-    if (filtered.length === 0) {
+    if (!Array.isArray(data) || data.length === 0) {
       els.prescriptionHistory.textContent = "暂无处方记录。";
       return;
     }
-    els.prescriptionHistory.innerHTML = filtered.map(renderHistoryCard).join("");
+    els.prescriptionHistory.innerHTML = data.map(renderHistoryCard).join("");
   } catch (error) {
     const hint =
       error?.name === "AbortError"
         ? "历史处方请求超时，请确认后端已启动。"
-        : "加载失败，请确认后端已启动且 CORS 已配置。";
+        : "加载失败，请确认后端已启动且已登录。";
     els.prescriptionHistory.textContent = hint;
   }
 }
@@ -396,12 +502,15 @@ async function requestPrescription(formData) {
     await new Promise((resolve) => window.setTimeout(resolve, 600));
     return { ...window.MockService.buildMockPrescription(formData), source: "mock" };
   }
+  if (!requireLogin()) {
+    return null;
+  }
 
   const response = await fetchWithTimeout(
     `${window.APP_CONFIG.API_BASE}/generate_prescription`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
         name: formData.name,
         age: formData.age,
@@ -413,6 +522,11 @@ async function requestPrescription(formData) {
     },
     window.APP_CONFIG.PRESCRIPTION_TIMEOUT_MS
   );
+
+  if (response.status === 401) {
+    logoutSession();
+    throw new Error("登录已过期，请重新登录");
+  }
 
   if (!response.ok) {
     const detail = await parseApiError(response);
@@ -763,15 +877,20 @@ function updateModeBadge() {
 }
 
 function bindEvents() {
-  els.loginForm.addEventListener("submit", (event) => {
+  els.authLoginForm?.addEventListener("submit", (event) => {
     event.preventDefault();
-    const loginData = readLoginData();
-    if (!validateLoginForm(loginData)) return;
-    state.currentUser = loginData;
-    persistCurrentUser();
-    updateUserIdentity();
-    showToast(`欢迎你，${loginData.name}`);
-    goToStep("intake");
+    submitAuth("login");
+  });
+
+  els.authRegisterForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    submitAuth("register");
+  });
+
+  els.authTabs().forEach((button) => {
+    button.addEventListener("click", () => {
+      switchAuthTab(button.dataset.authTab);
+    });
   });
 
   els.mobilityScore.addEventListener("input", (event) => {
@@ -780,6 +899,7 @@ function bindEvents() {
 
   els.intakeForm.addEventListener("submit", async (event) => {
     event.preventDefault();
+    if (!requireLogin()) return;
     const formData = readFormData();
     if (!validateForm(formData)) return;
 
@@ -854,19 +974,13 @@ function bindEvents() {
     stopCamera();
     goToStep("prescription");
   });
-  els.loginButton.addEventListener("click", () => submitAuth("login"));
-  els.registerButton.addEventListener("click", () => submitAuth("register"));
-  els.logoutButton.addEventListener("click", () => {
-    saveAuth(null);
-    els.prescriptionHistory.textContent = "请先登录后查看历史处方。";
-    showToast("已退出登录");
-  });
+  els.logoutButton?.addEventListener("click", logoutSession);
 
   els.stepButtons().forEach((button) => {
     button.addEventListener("click", () => {
       if (button.disabled) return;
       const step = button.dataset.step;
-      if (step !== "login" && !state.currentUser) return;
+      if (step !== "login" && !isSessionReady()) return;
       if (step === "training" && !state.currentAction) return;
       if (step === "prescription" && !state.prescription) return;
       goToStep(step);
@@ -874,22 +988,19 @@ function bindEvents() {
   });
 }
 
-function initDemoHint() {
-  els.demoHint.textContent = window.APP_CONFIG.DEMO_MODE
-    ? "Demo 模式：处方与纠正使用本地 Mock。点击「切换 API 模式」连接豆包后端。"
-    : "API 模式：处方走豆包，纠正走后端算法。需要后端运行在 localhost:8000。";
-}
-
 function init() {
-  state.currentUser = loadPersistedUser();
+  state.auth = readStoredAuth();
+  if (state.auth?.user) {
+    syncCurrentUserFromAuth();
+  }
+
   initPainRegions();
   bindEvents();
-  initDemoHint();
   updateModeBadge();
-  updateUserIdentity();
-  if (state.currentUser) {
-    els.loginName.value = state.currentUser.name;
-    els.loginAge.value = state.currentUser.age;
+  updateAuthStatus();
+  switchAuthTab("login");
+
+  if (isSessionReady()) {
     goToStep("intake");
   } else {
     goToStep("login");

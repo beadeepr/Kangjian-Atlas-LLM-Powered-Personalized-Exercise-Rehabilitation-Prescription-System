@@ -54,25 +54,36 @@ def get_db():
         db.close()
 
 
-def get_current_user(
-    authorization: str | None = Header(default=None),
-    db: Session = Depends(get_db),
-):
+def _resolve_user_from_token(authorization: str | None, db: Session):
     if not authorization:
-        raise HTTPException(status_code=401, detail="missing authorization header")
+        return None
     scheme, _, token = authorization.partition(" ")
     if scheme.lower() != "bearer" or not token:
-        raise HTTPException(status_code=401, detail="invalid authorization header")
+        return None
     try:
         payload = decode_access_token(token)
         user_id = int(payload.get("sub"))
     except (AuthError, TypeError, ValueError):
-        raise HTTPException(status_code=401, detail="invalid or expired token")
+        return None
 
-    user = db.query(models.UserModel).filter_by(id=user_id).first()
+    return db.query(models.UserModel).filter_by(id=user_id).first()
+
+
+def get_current_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    user = _resolve_user_from_token(authorization, db)
     if not user:
-        raise HTTPException(status_code=401, detail="user not found")
+        raise HTTPException(status_code=401, detail="invalid or expired token")
     return user
+
+
+def get_optional_user(
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_db),
+):
+    return _resolve_user_from_token(authorization, db)
 
 
 @router.post("/register", response_model=UserResponse, status_code=201)
@@ -129,7 +140,11 @@ def login(req: UserLoginRequest, db: Session = Depends(get_db)):
 
 
 @router.post("/generate_prescription", response_model=PrescriptionResponse)
-def generate_prescription(req: PrescriptionRequest, db: Session = Depends(get_db)):
+def generate_prescription(
+    req: PrescriptionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_optional_user),
+):
     from .validators import validate_pain_regions, validate_symptoms
 
     if not req.symptoms:
@@ -140,7 +155,21 @@ def generate_prescription(req: PrescriptionRequest, db: Session = Depends(get_db
     symptom_error = validate_symptoms(req.symptoms, req.pain_regions)
     if symptom_error:
         raise HTTPException(status_code=400, detail=symptom_error)
-    prescription = create_prescription(db, req)
+
+    patient_name = req.name
+    patient_age = req.age
+    if current_user:
+        patient_name = patient_name or current_user.nickname
+        patient_age = patient_age if patient_age is not None else current_user.age
+    req = PrescriptionRequest(
+        name=patient_name,
+        age=patient_age,
+        symptoms=req.symptoms,
+        history=req.history,
+        pain_regions=req.pain_regions,
+        mobility_score=req.mobility_score,
+    )
+    prescription = create_prescription(db, req, user_id=current_user.id if current_user else None)
     actions = get_actions_by_prescription(db, prescription.id)
     return PrescriptionResponse(
         id=prescription.id,

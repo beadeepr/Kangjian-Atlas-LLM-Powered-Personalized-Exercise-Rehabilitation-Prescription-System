@@ -100,7 +100,7 @@ def list_prescriptions(db: Session, user_id: int | None = None):
     return query.order_by(models.PrescriptionModel.created_at.desc()).all()
 
 
-def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
+def create_prescription(db: Session, prescription: schema.PrescriptionRequest, user_id: int | None = None):
     from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_prescription
     from .doubao import generate_prescription_summary
 
