@@ -15,6 +15,21 @@ DEFAULT_PROMPT_TEMPLATE = (
     "请输出 JSON，包含 summary、actions、warnings、follow_up。"
 )
 
+REGION_HINTS = {
+    "颈部": ["颈", "颈椎", "脖子", "转头", "落枕", "低头"],
+    "肩部": ["肩", "肩胛", "圆肩", "抬手", "冻结"],
+    "腰部": ["腰", "腰椎", "久坐", "弯腰", "突出", "劳损"],
+    "膝关节": ["膝", "髌骨", "蹲", "下楼", "跑步"],
+    "踝关节": ["踝", "脚跟", "小腿", "跟腱", "肿胀"],
+}
+
+
+def load_action_catalog() -> List[dict]:
+    actions_file = BASE_DIR / "knowledge" / "actions.json"
+    with open(actions_file, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("actions", [])
+
 
 def load_action_library() -> List[ActionItem]:
     actions_file = BASE_DIR / 'knowledge' / 'actions.json'
@@ -34,6 +49,92 @@ def load_action_library() -> List[ActionItem]:
         body_regions=item.get('body_regions', []),
         target_conditions=item.get('target_conditions', []),
     ) for item in data.get('actions', [])]
+
+
+def _score_action(
+    action: ActionItem,
+    symptoms: str,
+    pain_regions: Optional[List[str]],
+    history: Optional[str],
+) -> int:
+    text = f"{symptoms} {history or ''}".lower()
+    score = 0
+
+    for region in pain_regions or []:
+        if region in (action.body_regions or []):
+            score += 4
+        for hint in REGION_HINTS.get(region, []):
+            if hint.lower() in text:
+                score += 1
+
+    for condition in action.target_conditions or []:
+        if condition.lower() in text:
+            score += 3
+
+    for region, hints in REGION_HINTS.items():
+        if region in (action.body_regions or []) and any(hint.lower() in text for hint in hints):
+            score += 2
+
+    if (action.reps or 0) > 0:
+        score += 1
+
+    return score
+
+
+def select_actions_for_prescription(
+    symptoms: str,
+    pain_regions: Optional[List[str]] = None,
+    history: Optional[str] = None,
+    mobility_score: Optional[int] = None,
+    min_actions: int = 2,
+    max_actions: int = 4,
+) -> List[ActionItem]:
+    actions = load_action_library()
+    scored = [(_score_action(action, symptoms, pain_regions, history), action) for action in actions]
+    scored.sort(key=lambda pair: pair[0], reverse=True)
+
+    selected = [action for score, action in scored if score > 0][:max_actions]
+
+    if len(selected) < min_actions:
+        fallback_ids = []
+        region_defaults = {
+            "颈部": ["neck_chin_tuck", "neck_side_bend"],
+            "肩部": ["scapular_retraction", "thoracic_extension"],
+            "腰部": ["pelvic_tilt", "bird_dog", "glute_bridge"],
+            "膝关节": ["wall_squat", "straight_leg_raise", "quad_set"],
+            "踝关节": ["calf_stretch", "ankle_pump"],
+        }
+        for region in pain_regions or []:
+            fallback_ids.extend(region_defaults.get(region, []))
+
+        if not fallback_ids:
+            fallback_ids = ["neck_side_bend", "pelvic_tilt", "wall_squat"]
+
+        library_by_id = {action.id: action for action in actions}
+        for action_id in fallback_ids:
+            if len(selected) >= min_actions:
+                break
+            candidate = library_by_id.get(action_id)
+            if candidate and all(item.id != candidate.id for item in selected):
+                selected.append(candidate)
+
+    if mobility_score is not None and mobility_score <= 4:
+        adjusted = []
+        for action in selected:
+            adjusted.append(
+                ActionItem(
+                    **(
+                        action.model_dump()
+                        if hasattr(action, "model_dump")
+                        else action.dict()
+                    ),
+                    sets=max(2, (action.sets or 3) - 1),
+                    reps=max(1, action.reps or 1),
+                )
+            )
+        return adjusted[:max_actions]
+
+    return selected[:max_actions]
 
 
 def select_actions_for_request(
@@ -83,10 +184,10 @@ def select_actions_for_request(
 
 
 def load_prompt_template() -> str:
-    template_file = BASE_DIR / 'knowledge' / 'prompt_template.txt'
+    template_file = BASE_DIR / "knowledge" / "prompt_template.txt"
     if not template_file.exists():
         return DEFAULT_PROMPT_TEMPLATE
-    text = template_file.read_text(encoding='utf-8').strip()
+    text = template_file.read_text(encoding="utf-8").strip()
     return text or DEFAULT_PROMPT_TEMPLATE
 
 

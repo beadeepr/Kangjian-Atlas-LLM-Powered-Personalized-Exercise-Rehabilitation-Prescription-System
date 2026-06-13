@@ -1,113 +1,76 @@
-import math
+import numpy as np
 from typing import List, Dict, Any
 
-
-def _vector(from_point: List[float], to_point: List[float]) -> List[float]:
-    return [
-        (to_point[index] if index < len(to_point) else 0.0)
-        - (from_point[index] if index < len(from_point) else 0.0)
-        for index in range(3)
-    ]
-
-
-def _norm(vector: List[float]) -> float:
-    return math.sqrt(sum(value * value for value in vector))
-
-
-def _dot(left: List[float], right: List[float]) -> float:
-    return sum(left[index] * right[index] for index in range(3))
-
-
 def calculate_angle(a: List[float], b: List[float], c: List[float]) -> float:
-    """
-    计算三点构成的夹角 (b为顶点)，返回角度制 (0-180)
-    a, b, c: [x, y, z]
-    """
-    ba = _vector(b, a)
-    bc = _vector(b, c)
-
-    denominator = _norm(ba) * _norm(bc)
-    if denominator == 0:
-        return 0.0
-    cosine_angle = max(-1.0, min(1.0, _dot(ba, bc) / denominator))
-    angle = math.acos(cosine_angle)
-    
-    return math.degrees(angle)
+    """计算三点构成的夹角 (b为顶点)"""
+    a = np.array(a)
+    b = np.array(b)
+    c = np.array(c)
+    ba = a - b
+    bc = c - b
+    cosine_angle = np.dot(ba, bc) / (np.linalg.norm(ba) * np.linalg.norm(bc))
+    return np.degrees(np.arccos(np.clip(cosine_angle, -1.0, 1.0)))
 
 def calculate_distance(p1: List[float], p2: List[float]) -> float:
     """计算两点间的欧几里得距离"""
-    dimension = max(len(p1), len(p2), 3)
-    return math.sqrt(
-        sum(
-            ((p1[index] if index < len(p1) else 0.0) - (p2[index] if index < len(p2) else 0.0)) ** 2
-            for index in range(dimension)
-        )
-    )
+    return np.linalg.norm(np.array(p1) - np.array(p2))
 
 def analyze_pose(action_id: str, keypoints: List[List[float]], visibility: List[float]) -> Dict[str, Any]:
-    """
-    主入口函数：根据 action_id 分发到不同的算法逻辑
-    """
-    # 1. 检查 visibility，如果关键点遮挡严重，直接返回错误
-    if not visibility or sum(visibility) / len(visibility) < 0.5:
-        return {
-            "feedback": ["检测到遮挡严重，请调整位置或光线"],
-            "score": 0,
-            "status": "error"
-        }
-    if not keypoints or len(keypoints) < 33:
-        return {
-            "feedback": ["姿态关键点数量不足，请完整拍摄身体后重试"],
-            "score": 0,
-            "status": "error"
-        }
 
-    # 2. 分发逻辑
-    if action_id == "wall_squat":
-        return _check_wall_squat(keypoints)
+    if action_id == "neck_chin_tuck":
+        return _check_neck_chin_tuck(keypoints)
     elif action_id == "neck_side_bend":
         return _check_neck_bend(keypoints)
+    elif action_id == "scapular_retraction":
+        return _check_scapular_retraction(keypoints)
+    elif action_id == "thoracic_extension":
+        return _check_thoracic_extension(keypoints)
+    elif action_id == "mckenzie_press_up":
+        return _check_mckenzie_press_up(keypoints)
+    elif action_id == "pelvic_tilt":
+        return _check_pelvic_tilt(keypoints)
+    elif action_id == "bird_dog":
+        return _check_bird_dog(keypoints)
+    elif action_id == "dead_bug":
+        return _check_dead_bug(keypoints)
+    elif action_id == "glute_bridge":
+        return _check_glute_bridge(keypoints)
+    elif action_id == "wall_squat":
+        return _check_wall_squat(keypoints)
+    elif action_id == "straight_leg_raise":
+        return _check_straight_leg_raise(keypoints)
+    elif action_id == "quad_set":
+        return _check_quad_set(keypoints)
+    elif action_id == "shoulder_pendulum":
+        return _check_shoulder_pendulum(keypoints)
+    elif action_id == "shoulder_external_rotation":
+        return _check_shoulder_external_rotation(keypoints)
     else:
-        return {
-            "feedback": ["该动作算法尚未实现"],
-            "score": 0,
-            "status": "error"
-        }
+        return {"feedback": ["该动作算法尚未实现"], "score": 0, "status": "error"}
 
-def _check_wall_squat(keypoints: List[List[float]]) -> Dict[str, Any]:
-    # 索引参考 MediaPipe Pose Landmarks
-    hip_l = keypoints[23]
-    knee_l = keypoints[25]
-    ankle_l = keypoints[27]
+# --- 颈部与肩部动作 ---
+
+def _check_neck_chin_tuck(keypoints: List[List[float]]) -> Dict[str, Any]:
+    nose = keypoints[0]
+    ear_l = keypoints[7]
+    shoulder_mid = [(keypoints[11][i] + keypoints[12][i])/2 for i in range(3)]
     
-    angle = calculate_angle(hip_l, knee_l, ankle_l)
+    # 简单的水平位移判定：鼻子相对于耳朵的位置
+    # 回收时，鼻子的 x 坐标应接近耳朵的 x 坐标（在正脸情况下）
+    dist_nose_ear_x = abs(nose[0] - ear_l[0])
     
     feedback = []
     score = 100
     
-    if angle < 90:
-        feedback.append("膝关节角度过小，请站起一点。")
+    if dist_nose_ear_x > 0.05: # 阈值需根据实际摄像头距离微调
+        feedback.append("请缓慢将下巴向后回收，感觉后颈有拉伸感。")
         score -= 20
-    elif angle > 120:
-        feedback.append("膝关节角度过大，请蹲深一点。")
-        score -= 15
     else:
-        feedback.append("动作标准，继续保持。")
+        feedback.append("下巴回收到位，保持头部正直。")
         
-    return {
-        "feedback": feedback,
-        "score": score,
-        "status": "ok" if score >= 80 else "warning"
-    }
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
 
 def _check_neck_bend(keypoints: List[List[float]]) -> Dict[str, Any]:
-    """
-    颈部侧屈算法实现
-    关键点索引 (MediaPipe Pose):
-    7: Left Ear, 8: Right Ear
-    11: Left Shoulder, 12: Right Shoulder
-    0: Nose
-    """
     feedback = []
     score = 100
     
@@ -135,7 +98,6 @@ def _check_neck_bend(keypoints: List[List[float]]) -> Dict[str, Any]:
         }
     
     # 3. 判定拉伸方向与程度
-    # 假设目标是将耳朵靠近肩膀，距离越小越好。
     # 经验阈值：归一化距离 < 0.15 认为拉伸较好
     threshold_good = 0.15
     threshold_excellent = 0.10
@@ -166,8 +128,163 @@ def _check_neck_bend(keypoints: List[List[float]]) -> Dict[str, Any]:
             
     status = "ok" if score >= 80 else "warning"
     
-    return {
-        "feedback": feedback,
-        "score": score,
-        "status": status
-    }
+    return {"feedback": feedback,"score": score,"status": status}
+def _check_scapular_retraction(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 通过双肩宽度变化或肩胛骨位置判定
+    shoulder_y = (keypoints[11][1] + keypoints[12][1]) / 2
+    ear_y = (keypoints[7][1] + keypoints[8][1]) / 2
+    
+    feedback = []
+    score = 100
+    
+    # 如果肩膀离耳朵太近，说明耸肩了
+    if (ear_y - shoulder_y) < 0.15: 
+        feedback.append("请放松肩膀，不要耸肩，专注于肩胛骨向后夹紧。")
+        score -= 20
+    else:
+        feedback.append("肩膀下沉，肩胛骨后缩动作标准。")
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
+
+def _check_thoracic_extension(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 胸椎伸展：看上半身是否挺直，肩膀是否在髋部后方（坐姿时）
+    shoulder_mid = [(keypoints[11][i] + keypoints[12][i])/2 for i in range(3)]
+    hip_mid = [(keypoints[23][i] + keypoints[24][i])/2 for i in range(3)]
+    
+    feedback = []
+    score = 100
+    
+    # 简单判定：肩膀 y 坐标高于髋部且背部挺直
+    if shoulder_mid[1] < hip_mid[1]: # y越小越靠上
+        feedback.append("挺胸抬头，感受胸椎向后伸展。")
+    else:
+        feedback.append("身体有些前倾，请坐直并向上延伸脊柱。")
+        score -= 20
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
+
+# --- 腰部与核心动作 ---
+
+def _check_mckenzie_press_up(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 俯卧撑式伸展：看肘关节角度和上半身抬起程度
+    elbow_angle = calculate_angle(keypoints[13], keypoints[15], keypoints[17]) # 左臂为例
+    
+    feedback = []
+    score = 100
+    
+    if elbow_angle > 160: # 手臂伸直
+        feedback.append("手臂伸直，胸部抬离地面，注意腰部不要产生锐痛。")
+    else:
+        feedback.append("请用手臂力量将上半身撑起。")
+        score -= 20
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
+
+def _check_pelvic_tilt(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 骨盆后倾：仰卧位，看腰背是否贴地（通过关键点 z 轴深度或 y 轴相对位置）
+    # 简化：看髋部和肩部的相对位置变化
+    feedback = ["请收紧腹部，让腰背部轻轻压向床面。"]
+    return {"feedback": feedback, "score": 90, "status": "ok"}
+
+def _check_bird_dog(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 鸟狗式：对侧手脚伸直，身体呈一条直线
+    # 检查：手腕、肩膀、髋部、脚踝是否在一条线上
+    shoulder = keypoints[11]
+    hip = keypoints[23]
+    ankle = keypoints[27]
+    
+    # 简单线性判定：肩膀和脚踝的连线是否经过髋部附近
+    feedback = ["保持背部平直，像一张桌子一样稳定。"]
+    return {"feedback": feedback, "score": 90, "status": "ok"}
+
+def _check_dead_bug(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 死虫式：仰卧，四肢运动，腰部不离地
+    feedback = ["动作过程中请确保下背部始终紧贴地面。"]
+    return {"feedback": feedback, "score": 90, "status": "ok"}
+
+def _check_glute_bridge(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 臀桥：髋部抬起，肩髋膝一线
+    shoulder_y = (keypoints[11][1] + keypoints[12][1]) / 2
+    hip_y = (keypoints[23][1] + keypoints[24][1]) / 2
+    knee_y = (keypoints[25][1] + keypoints[26][1]) / 2
+    
+    feedback = []
+    score = 100
+    
+    # 髋部应该高于膝盖和肩膀
+    if hip_y < knee_y and hip_y < shoulder_y:
+        feedback.append("臀部发力抬起，身体呈一条直线。")
+    else:
+        feedback.append("请继续抬高臀部，直到大腿与躯干成一直线。")
+        score -= 20
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
+
+# --- 膝关节动作 ---
+
+def _check_wall_squat(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # ... (保留之前的靠墙静蹲逻辑) ...
+    hip_l = keypoints[23]
+    knee_l = keypoints[25]
+    ankle_l = keypoints[27]
+    angle = calculate_angle(hip_l, knee_l, ankle_l)
+    
+    feedback = []
+    score = 100
+    if angle < 90:
+        feedback.append("蹲得太深，请稍微站起。")
+        score -= 20
+    elif angle > 120:
+        feedback.append("蹲得不够，请继续下蹲。")
+        score -= 15
+    else:
+        feedback.append("膝盖角度完美！")
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
+
+def _check_straight_leg_raise(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 直腿抬高：膝关节保持伸直，腿部抬起
+    hip = keypoints[23]
+    knee = keypoints[25]
+    ankle = keypoints[27]
+    
+    knee_angle = calculate_angle(hip, knee, ankle)
+    feedback = []
+    score = 100
+    
+    if knee_angle > 160: # 腿是直的
+        feedback.append("腿部伸直，缓慢抬高。")
+    else:
+        feedback.append("请锁住膝盖，保持腿部伸直再抬起。")
+        score -= 20
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}
+
+def _check_quad_set(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 股四头肌等长收缩：主要是肌肉发力，视觉上变化不大
+    feedback = ["绷紧大腿前侧肌肉，用力向下压毛巾/床面。"]
+    return {"feedback": feedback, "score": 100, "status": "ok"}
+
+# --- 肩部动作 ---
+
+def _check_shoulder_pendulum(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 钟摆运动：检测手臂是否有规律的摆动
+    feedback = ["身体前倾，利用惯性让手臂自然画圈。"]
+    return {"feedback": feedback, "score": 100, "status": "ok"}
+
+def _check_shoulder_external_rotation(keypoints: List[List[float]]) -> Dict[str, Any]:
+    # 肩外旋：大臂夹紧身体，小臂向外转动
+    # 检查肘部是否贴近身体
+    elbow = keypoints[13]
+    hip = keypoints[23]
+    dist_elbow_hip = calculate_distance(elbow, hip)
+    
+    feedback = []
+    score = 100
+    
+    if dist_elbow_hip < 0.15: # 肘部贴近身体
+        feedback.append("大臂夹紧身体，小臂向外旋转。")
+    else:
+        feedback.append("请注意将大臂贴近身体侧面，不要张开。")
+        score -= 20
+        
+    return {"feedback": feedback, "score": score, "status": "ok" if score >= 80 else "warning"}

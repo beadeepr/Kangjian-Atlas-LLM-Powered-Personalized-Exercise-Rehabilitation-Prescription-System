@@ -100,13 +100,15 @@ def list_prescriptions(db: Session, user_id: int | None = None):
     return query.order_by(models.PrescriptionModel.created_at.desc()).all()
 
 
-def create_prescription(db: Session, prescription: schema.PrescriptionRequest, user_id: int | None = None):
-    from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_request
+def create_prescription(db: Session, prescription: schema.PrescriptionRequest):
+    from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_prescription
     from .doubao import generate_prescription_summary
 
-    selected_actions = select_actions_for_request(
+    selected_actions = select_actions_for_prescription(
         symptoms=prescription.symptoms,
         pain_regions=prescription.pain_regions,
+        history=prescription.history,
+        mobility_score=prescription.mobility_score,
     )
     action_payload = [_action_to_dict(action) for action in selected_actions]
 
@@ -176,6 +178,12 @@ def create_pose_feedback(db: Session, request: schema.PoseCorrectionRequest):
     elif not request.keypoints:
         result = {
             "feedback": ["缺少姿态关键点，请重新采集视频帧。"],
+            "score": 0,
+            "status": "error",
+        }
+    elif len(request.keypoints) < 33:
+        result = {
+            "feedback": ["姿态关键点不足，请确保全身进入画面。"],
             "score": 0,
             "status": "error",
         }

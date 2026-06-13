@@ -71,5 +71,5 @@ class PoseCorrectionRequest(BaseModel):
 
 class PoseCorrectionResponse(BaseModel):
     feedback: List[str]
-    score: int = 0
-    status: str = "warning"
+    score: Optional[int] = None
+    status: Optional[str] = None
