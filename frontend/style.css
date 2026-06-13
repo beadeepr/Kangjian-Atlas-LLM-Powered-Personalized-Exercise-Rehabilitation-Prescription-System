@@ -131,6 +131,33 @@ textarea {
   font-size: 0.85rem;
 }
 
+.auth-panel {
+  flex-basis: 100%;
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 90px 90px auto auto auto minmax(120px, auto);
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.78);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+
+.auth-panel input,
+.auth-panel select {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 10px;
+  background: #fff;
+}
+
+.auth-status {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
 .brand {
   display: flex;
   align-items: center;
@@ -336,6 +363,8 @@ textarea {
 
 input[type="text"],
 input[type="number"],
+input[type="password"],
+select,
 textarea {
   width: 100%;
   border: 1px solid #d7e2f2;
@@ -349,6 +378,8 @@ textarea {
 
 input[type="text"]:focus,
 input[type="number"]:focus,
+input[type="password"]:focus,
+select:focus,
 textarea:focus {
   outline: 2px solid rgba(26, 115, 232, 0.2);
   border-color: var(--primary);
@@ -753,6 +784,14 @@ textarea {
   .form-grid,
   .training-layout {
     grid-template-columns: 1fr;
+  }
+
+  .auth-panel {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .auth-status {
+    grid-column: 1 / -1;
   }
 
   .app-header {

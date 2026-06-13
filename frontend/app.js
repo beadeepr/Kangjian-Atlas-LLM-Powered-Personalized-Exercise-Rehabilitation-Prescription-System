@@ -55,7 +55,65 @@ const els = {
   demoHint: document.getElementById("demo-hint"),
   modeBadge: document.getElementById("mode-badge"),
   toast: document.getElementById("toast"),
+  authForm: document.getElementById("auth-form"),
+  authAccount: document.getElementById("auth-account"),
+  authPassword: document.getElementById("auth-password"),
+  authNickname: document.getElementById("auth-nickname"),
+  authGender: document.getElementById("auth-gender"),
+  authAge: document.getElementById("auth-age"),
+  authStatus: document.getElementById("auth-status"),
+  loginButton: document.getElementById("login-button"),
+  registerButton: document.getElementById("register-button"),
+  logoutButton: document.getElementById("logout-button"),
 };
+
+function readStoredAuth() {
+  try {
+    return JSON.parse(localStorage.getItem("kj_auth") || "null");
+  } catch (error) {
+    return null;
+  }
+}
+
+function saveAuth(auth) {
+  state.auth = auth;
+  if (auth) {
+    localStorage.setItem("kj_auth", JSON.stringify(auth));
+  } else {
+    localStorage.removeItem("kj_auth");
+  }
+  updateAuthStatus();
+}
+
+function authHeaders(extra = {}) {
+  return state.auth?.token
+    ? { ...extra, Authorization: `Bearer ${state.auth.token}` }
+    : extra;
+}
+
+function requireLogin() {
+  if (window.APP_CONFIG.DEMO_MODE || state.auth?.token) {
+    return true;
+  }
+  showToast("请先登录后再使用真实后端服务");
+  return false;
+}
+
+function updateAuthStatus() {
+  if (!els.authStatus) return;
+  if (window.APP_CONFIG.DEMO_MODE) {
+    els.authStatus.textContent = "Demo 模式";
+    els.logoutButton.disabled = true;
+    return;
+  }
+  if (state.auth?.user) {
+    els.authStatus.textContent = `已登录：${state.auth.user.nickname}`;
+    els.logoutButton.disabled = false;
+  } else {
+    els.authStatus.textContent = "未登录";
+    els.logoutButton.disabled = true;
+  }
+}
 
 function showToast(message) {
   els.toast.textContent = message;
@@ -308,6 +366,10 @@ async function loadPrescriptionHistory() {
   }
 
   els.prescriptionHistory.textContent = "正在加载…";
+  if (!requireLogin()) {
+    els.prescriptionHistory.textContent = "请先登录后查看历史处方。";
+    return;
+  }
   try {
     const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/prescriptions`);
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -733,6 +795,9 @@ function bindEvents() {
 
     try {
       const prescription = await requestPrescription(formData);
+      if (!prescription) {
+        return;
+      }
       state.prescription = prescription;
       renderPrescription(prescription);
       goToStep("prescription");
@@ -788,6 +853,13 @@ function bindEvents() {
   document.getElementById("stop-training").addEventListener("click", () => {
     stopCamera();
     goToStep("prescription");
+  });
+  els.loginButton.addEventListener("click", () => submitAuth("login"));
+  els.registerButton.addEventListener("click", () => submitAuth("register"));
+  els.logoutButton.addEventListener("click", () => {
+    saveAuth(null);
+    els.prescriptionHistory.textContent = "请先登录后查看历史处方。";
+    showToast("已退出登录");
   });
 
   els.stepButtons().forEach((button) => {

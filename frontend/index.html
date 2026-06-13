@@ -34,6 +34,22 @@
         <button class="step-item" data-step="history" type="button" disabled>4 历史</button>
         <button class="step-item" data-step="training" type="button" disabled>5 跟练</button>
       </nav>
+      <form id="auth-form" class="auth-panel" autocomplete="off">
+        <input id="auth-account" name="account" type="text" placeholder="账号" />
+        <input id="auth-password" name="password" type="password" placeholder="密码" />
+        <input id="auth-nickname" name="nickname" type="text" placeholder="昵称" />
+        <select id="auth-gender" name="gender" aria-label="性别">
+          <option value="">性别</option>
+          <option value="男">男</option>
+          <option value="女">女</option>
+          <option value="其他">其他</option>
+        </select>
+        <input id="auth-age" name="age" type="number" min="1" max="120" placeholder="年龄" />
+        <button class="btn btn-secondary" id="login-button" type="button">登录</button>
+        <button class="btn btn-primary" id="register-button" type="button">注册</button>
+        <button class="btn btn-secondary" id="logout-button" type="button">退出</button>
+        <span id="auth-status" class="auth-status">未登录</span>
+      </form>
     </header>
 
     <main class="app-main">

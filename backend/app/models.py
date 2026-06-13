@@ -14,6 +14,7 @@ class PrescriptionModel(Base):
     __tablename__ = 'prescriptions'
 
     id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
     patient_name = Column(String(128), nullable=True)
     patient_age = Column(Integer, nullable=True)
     symptoms = Column(Text, nullable=False)
@@ -24,6 +25,7 @@ class PrescriptionModel(Base):
     updated_at = Column(DateTime, default=now, onupdate=now)
 
     actions = relationship('ActionModel', back_populates='prescription', cascade='all, delete-orphan')
+    user = relationship('UserModel', back_populates='prescriptions')
 
 
 class ActionModel(Base):
@@ -48,3 +50,18 @@ class PoseFeedbackModel(Base):
     request_data = Column(JSON, nullable=True)
     feedback = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=now)
+
+
+class UserModel(Base):
+    __tablename__ = 'users'
+
+    id = Column(Integer, primary_key=True, index=True)
+    account = Column(String(64), unique=True, nullable=False, index=True)
+    password_hash = Column(String(256), nullable=False)
+    nickname = Column(String(64), nullable=False)
+    gender = Column(String(16), nullable=True)
+    age = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
+
+    prescriptions = relationship('PrescriptionModel', back_populates='user')

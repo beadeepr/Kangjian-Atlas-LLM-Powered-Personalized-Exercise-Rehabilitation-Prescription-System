@@ -2,6 +2,33 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 
+class UserCreateRequest(BaseModel):
+    account: str
+    password: str
+    nickname: str
+    gender: Optional[str] = None
+    age: Optional[int] = None
+
+
+class UserLoginRequest(BaseModel):
+    account: str
+    password: str
+
+
+class UserResponse(BaseModel):
+    id: int
+    account: str
+    nickname: str
+    gender: Optional[str] = None
+    age: Optional[int] = None
+
+
+class LoginResponse(BaseModel):
+    message: str
+    token: str
+    user: UserResponse
+
+
 class PrescriptionRequest(BaseModel):
     name: Optional[str] = None
     age: Optional[int] = None
