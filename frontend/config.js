@@ -13,14 +13,30 @@ function readDemoMode() {
   return false;
 }
 
+function readDevMode() {
+  const query = new URLSearchParams(window.location.search);
+  return query.get("dev") === "true" || query.get("dev") === "1";
+}
+
 window.APP_CONFIG = {
   API_BASE: window.API_BASE || "http://localhost:8000/api",
   DEMO_MODE: readDemoMode(),
+  DEV_MODE: readDevMode(),
   FETCH_TIMEOUT_MS: 2000,
-  PRESCRIPTION_TIMEOUT_MS: 30000,
+  AUTH_TIMEOUT_MS: 10000,
+  PRESCRIPTION_TIMEOUT_MS: 45000,
   POSE_TIMEOUT_MS: 2000,
   POSE_SEND_INTERVAL_MS: 100,
+  POSE_VISIBILITY_MIN: 0.5,
   SUPPORTED_POSE_ACTION_IDS: ["wall_squat", "neck_side_bend"],
+  ACTION_ID_ALIASES: {
+    neck_chin_tuck: "chin_tuck",
+    scapular_retraction: "shoulder_roll",
+  },
+  CATALOG_TO_BACKEND_ACTION_ID: {
+    chin_tuck: "neck_chin_tuck",
+    shoulder_roll: "scapular_retraction",
+  },
   assetUrl(path) {
     return new URL(path, window.location.href).href;
   },
@@ -28,10 +44,20 @@ window.APP_CONFIG = {
     localStorage.setItem("kj_demo_mode", enabled ? "true" : "false");
     this.DEMO_MODE = enabled;
   },
+  normalizeCatalogActionId(actionId) {
+    if (!actionId) return null;
+    return this.ACTION_ID_ALIASES[actionId] || actionId;
+  },
+  getBackendActionId(actionId) {
+    if (!actionId) return null;
+    const catalogId = this.normalizeCatalogActionId(actionId);
+    return this.CATALOG_TO_BACKEND_ACTION_ID[catalogId] || actionId;
+  },
 };
 
 window.APP_CONFIG.isPoseSupported = function isPoseSupported(actionId) {
-  return this.SUPPORTED_POSE_ACTION_IDS.includes(actionId);
+  const catalogId = this.normalizeCatalogActionId(actionId);
+  return this.SUPPORTED_POSE_ACTION_IDS.includes(catalogId);
 };
 
 window.ACTION_CATALOG = {

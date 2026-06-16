@@ -121,17 +121,10 @@ def select_actions_for_prescription(
     if mobility_score is not None and mobility_score <= 4:
         adjusted = []
         for action in selected:
-            adjusted.append(
-                ActionItem(
-                    **(
-                        action.model_dump()
-                        if hasattr(action, "model_dump")
-                        else action.dict()
-                    ),
-                    sets=max(2, (action.sets or 3) - 1),
-                    reps=max(1, action.reps or 1),
-                )
-            )
+            payload = action.model_dump() if hasattr(action, "model_dump") else action.dict()
+            payload["sets"] = max(2, (action.sets or 3) - 1)
+            payload["reps"] = max(1, action.reps or 1)
+            adjusted.append(ActionItem(**payload))
         return adjusted[:max_actions]
 
     return selected[:max_actions]

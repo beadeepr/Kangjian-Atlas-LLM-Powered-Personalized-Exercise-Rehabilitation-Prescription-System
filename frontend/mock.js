@@ -1,13 +1,20 @@
-function resolveActionId(action) {
+function resolveRawActionId(action) {
   if (action.id) return action.id;
   return window.ACTION_NAME_TO_ID[action.name] || null;
 }
 
+function resolveActionId(action) {
+  const rawId = resolveRawActionId(action);
+  return rawId ? window.APP_CONFIG.normalizeCatalogActionId(rawId) : null;
+}
+
 function enrichAction(action) {
-  const id = resolveActionId(action);
+  const rawId = resolveRawActionId(action);
+  const id = rawId ? window.APP_CONFIG.normalizeCatalogActionId(rawId) : null;
   const catalog = id ? window.ACTION_CATALOG[id] : null;
   return {
     id,
+    backendId: rawId ? window.APP_CONFIG.getBackendActionId(rawId) : null,
     name: action.name,
     sets: action.sets ?? catalog?.sets ?? 3,
     reps: action.reps ?? catalog?.reps ?? 10,
@@ -138,7 +145,8 @@ function mockCorrectPose(payload) {
     };
   }
 
-  if (!window.ACTION_CATALOG[action_id]) {
+  const catalogId = window.APP_CONFIG.normalizeCatalogActionId(action_id);
+  if (!window.APP_CONFIG.isPoseSupported(catalogId)) {
     return {
       feedback: ["暂不支持该动作"],
       score: 0,
@@ -146,7 +154,7 @@ function mockCorrectPose(payload) {
     };
   }
 
-  if (action_id === "wall_squat") {
+  if (catalogId === "wall_squat") {
     const hip = keypoints[23];
     const knee = keypoints[25];
     const ankle = keypoints[27];
@@ -173,7 +181,7 @@ function mockCorrectPose(payload) {
     };
   }
 
-  if (action_id === "neck_side_bend") {
+  if (catalogId === "neck_side_bend") {
     const leftEar = keypoints[7];
     const rightEar = keypoints[8];
     const leftShoulder = keypoints[11];

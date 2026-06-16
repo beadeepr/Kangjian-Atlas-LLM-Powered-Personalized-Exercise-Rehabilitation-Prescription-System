@@ -15,7 +15,7 @@
           <p class="subtitle">个性化运动康复处方生成系统</p>
         </div>
       </div>
-      <div class="header-actions">
+      <div class="header-actions" id="header-actions">
         <div class="user-identity" id="user-identity" hidden>
           <span class="user-avatar" id="user-avatar">康</span>
           <div class="user-meta">
@@ -24,9 +24,18 @@
         </div>
         <span class="mode-badge demo" id="mode-badge">Demo 模式</span>
         <button class="btn btn-secondary btn-small" id="toggle-demo" type="button">切换 API 模式</button>
-        <button class="btn btn-secondary btn-small" id="test-doubao" type="button">测试豆包</button>
+        <button class="btn btn-secondary btn-small dev-only" id="test-doubao" type="button">测试豆包</button>
         <button class="btn btn-secondary btn-small" id="logout-button" type="button" hidden>退出登录</button>
       </div>
+      <button
+        class="btn btn-secondary btn-small header-menu-toggle"
+        id="header-menu-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="header-actions"
+      >
+        更多
+      </button>
       <nav class="step-nav" aria-label="流程步骤">
         <button class="step-item active" data-step="login" type="button">1 登录</button>
         <button class="step-item" data-step="intake" type="button" disabled>2 问诊</button>
@@ -211,9 +220,9 @@
       </section>
 
       <section id="page-training" class="page" aria-labelledby="training-title">
-        <div class="page-head">
+        <div class="page-head training-head">
           <h2 id="training-title">实时动作纠正</h2>
-          <p id="training-action-name" class="summary-text"></p>
+          <p id="training-action-name" class="summary-text training-action-label"></p>
         </div>
 
         <div class="training-layout card">
@@ -221,23 +230,38 @@
             <video id="video" autoplay playsinline muted></video>
             <canvas id="overlay" width="640" height="480"></canvas>
             <div class="video-placeholder" id="video-placeholder">
-              <p>点击下方按钮启动摄像头</p>
-              <p class="hint">将自动加载 MediaPipe 并实时绘制骨架</p>
+              <p>准备开始跟练</p>
+              <p class="hint">请先阅读右侧拍摄建议，准备好后点击「启动摄像头」</p>
+            </div>
+            <div class="camera-loading" id="camera-loading" hidden>
+              <span class="camera-loading-spinner" aria-hidden="true"></span>
+              <p id="camera-loading-text">正在准备…</p>
             </div>
             <div class="feedback-overlay" id="feedback-overlay">等待检测…</div>
             <div class="score-badge" id="score-badge">-- 分</div>
           </div>
 
           <aside class="training-side">
-            <div class="status-panel" id="status-panel">
-              <span class="status-dot" id="status-dot"></span>
-              <span id="status-text">未开始</span>
+            <div class="training-tips">
+              <h3 class="training-tips-title">拍摄建议</h3>
+              <ul class="training-tips-list">
+                <li>距摄像头 1.5–2 米，确保头、躯干与四肢完整入镜</li>
+                <li id="training-pose-hint">侧对镜头，便于捕捉动作幅度</li>
+                <li>避免逆光或强遮挡，保证关节部位清晰可见</li>
+              </ul>
             </div>
-            <ul class="feedback-list" id="feedback-list"></ul>
+            <div class="training-side-card">
+              <h3 class="training-side-title">实时反馈</h3>
+              <div class="status-panel" id="status-panel">
+                <span class="status-dot" id="status-dot"></span>
+                <span id="status-text">未开始</span>
+              </div>
+              <ul class="feedback-list" id="feedback-list"></ul>
+            </div>
             <div class="training-actions">
-              <button class="btn btn-primary" id="start-camera" type="button">启动摄像头</button>
-              <button class="btn btn-secondary" id="simulate-pose" type="button">单次检测</button>
-              <button class="btn btn-secondary" id="stop-training" type="button">结束跟练</button>
+              <button class="btn btn-primary btn-block" id="start-camera" type="button">启动摄像头</button>
+              <button class="btn btn-secondary btn-block" id="stop-training" type="button">返回处方</button>
+              <button class="btn btn-success btn-block" id="complete-training" type="button">完成训练，返回处方</button>
             </div>
           </aside>
         </div>
@@ -246,8 +270,11 @@
 
     <div class="loading-overlay" id="loading-overlay" aria-hidden="true">
       <div class="loading-card">
-        <div class="spinner"></div>
         <p id="loading-text">正在处理…</p>
+        <div class="progress-track" aria-hidden="true">
+          <div class="progress-bar" id="loading-progress-bar"></div>
+        </div>
+        <p class="loading-percent" id="loading-percent">0%</p>
       </div>
     </div>
 

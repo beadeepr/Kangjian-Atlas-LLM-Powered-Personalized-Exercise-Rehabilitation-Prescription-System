@@ -44,11 +44,17 @@ const els = {
   doubaoResult: document.getElementById("doubao-result"),
   loadingOverlay: document.getElementById("loading-overlay"),
   loadingText: document.getElementById("loading-text"),
+  loadingProgressBar: document.getElementById("loading-progress-bar"),
+  loadingPercent: document.getElementById("loading-percent"),
   trainingActionName: document.getElementById("training-action-name"),
+  trainingPoseHint: document.getElementById("training-pose-hint"),
   videoShell: document.getElementById("video-shell"),
   video: document.getElementById("video"),
   overlay: document.getElementById("overlay"),
   videoPlaceholder: document.getElementById("video-placeholder"),
+  cameraLoading: document.getElementById("camera-loading"),
+  cameraLoadingText: document.getElementById("camera-loading-text"),
+  startCameraButton: document.getElementById("start-camera"),
   feedbackOverlay: document.getElementById("feedback-overlay"),
   scoreBadge: document.getElementById("score-badge"),
   statusDot: document.getElementById("status-dot"),
@@ -64,6 +70,9 @@ const els = {
   authGender: document.getElementById("auth-gender"),
   authAge: document.getElementById("auth-age"),
   logoutButton: document.getElementById("logout-button"),
+  testDoubaoButton: document.getElementById("test-doubao"),
+  headerActions: document.getElementById("header-actions"),
+  headerMenuToggle: document.getElementById("header-menu-toggle"),
 };
 
 function readStoredAuth() {
@@ -204,11 +213,15 @@ async function submitAuth(mode) {
   const endpoint = mode === "login" ? "login" : "register";
   setLoading(true, mode === "login" ? "正在登录…" : "正在注册…");
   try {
-    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/${endpoint}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/${endpoint}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+      window.APP_CONFIG.AUTH_TIMEOUT_MS
+    );
 
     if (!response.ok) {
       const detail = await parseApiError(response);
@@ -218,14 +231,18 @@ async function submitAuth(mode) {
 
     if (mode === "register") {
       showToast("注册成功，正在自动登录…");
-      const loginResponse = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          account: payload.account,
-          password: payload.password,
-        }),
-      });
+      const loginResponse = await fetchWithTimeout(
+        `${window.APP_CONFIG.API_BASE}/login`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            account: payload.account,
+            password: payload.password,
+          }),
+        },
+        window.APP_CONFIG.AUTH_TIMEOUT_MS
+      );
       if (!loginResponse.ok) {
         switchAuthTab("login");
         if (els.authAccount) els.authAccount.value = payload.account;
@@ -239,11 +256,19 @@ async function submitAuth(mode) {
       return;
     }
 
+    const data = await response.json();
     saveAuth({ token: data.token, user: data.user });
     showToast(`欢迎你，${data.user.nickname}`);
     goToStep("intake");
   } catch (error) {
-    showToast(error?.name === "AbortError" ? "登录请求超时，请确认后端已启动" : "登录失败，请检查后端服务");
+    const isNetworkError = error instanceof TypeError;
+    showToast(
+      error?.name === "AbortError"
+        ? "登录请求超时，请确认后端已启动"
+        : isNetworkError
+          ? "无法连接后端，请确认服务运行在 localhost:8000"
+          : "登录失败，请稍后重试"
+    );
   } finally {
     setLoading(false);
   }
@@ -272,13 +297,64 @@ function showToast(message) {
   }, 3200);
 }
 
-function setLoading(active, text = "正在处理…") {
+function setLoading(active, text = "正在处理…", progress = null) {
   els.loadingOverlay.classList.toggle("active", active);
+  els.loadingOverlay.setAttribute("aria-hidden", active ? "false" : "true");
   els.loadingText.textContent = text;
+  const pct =
+    progress === null
+      ? active
+        ? 35
+        : 0
+      : Math.max(0, Math.min(100, progress));
+  if (els.loadingProgressBar) els.loadingProgressBar.style.width = `${pct}%`;
+  if (els.loadingPercent) els.loadingPercent.textContent = `${Math.round(pct)}%`;
+}
+
+let prescriptionProgressTimer = null;
+
+function startPrescriptionLoading() {
+  stopPrescriptionLoading(false);
+  const steps = window.APP_CONFIG.DEMO_MODE
+    ? [
+        { text: "正在验证问诊信息…", progress: 25 },
+        { text: "正在匹配康复动作…", progress: 55 },
+        { text: "正在生成本地 Mock 处方…", progress: 82 },
+      ]
+    : [
+        { text: "正在验证问诊信息…", progress: 12 },
+        { text: "正在匹配康复动作…", progress: 28 },
+        { text: "正在调用豆包大模型…", progress: 48 },
+        { text: "正在生成处方摘要…", progress: 68 },
+        { text: "正在整理处方内容…", progress: 86 },
+      ];
+  let stepIndex = 0;
+  setLoading(true, steps[0].text, steps[0].progress);
+  prescriptionProgressTimer = window.setInterval(() => {
+    if (stepIndex < steps.length - 1) {
+      stepIndex += 1;
+      setLoading(true, steps[stepIndex].text, steps[stepIndex].progress);
+    }
+  }, 1800);
+}
+
+function finishPrescriptionLoading() {
+  stopPrescriptionLoading(false);
+  setLoading(true, "处方生成完成", 100);
+  window.setTimeout(() => setLoading(false), 450);
+}
+
+function stopPrescriptionLoading(resetOverlay = true) {
+  if (prescriptionProgressTimer) {
+    window.clearInterval(prescriptionProgressTimer);
+    prescriptionProgressTimer = null;
+  }
+  if (resetOverlay) setLoading(false);
 }
 
 function goToStep(step) {
   state.currentStep = step;
+  setHeaderMenuOpen(false);
   els.pages().forEach((page) => {
     page.classList.toggle("active", page.id === `page-${step}`);
   });
@@ -676,26 +752,58 @@ async function correctPose(payload) {
   };
 }
 
+function averageVisibility(visibility) {
+  if (!visibility?.length) return 1;
+  return visibility.reduce((sum, value) => sum + value, 0) / visibility.length;
+}
+
+function getPoseActionId(action) {
+  return action?.backendId || window.APP_CONFIG.getBackendActionId(action?.id) || action?.id;
+}
+
+function updateTrainingPoseHint(actionId) {
+  if (!els.trainingPoseHint) return;
+  const catalogId = window.APP_CONFIG.normalizeCatalogActionId(actionId);
+  if (catalogId === "wall_squat") {
+    els.trainingPoseHint.textContent = "侧对镜头，便于观察膝部弯曲角度";
+    return;
+  }
+  if (catalogId === "neck_side_bend") {
+    els.trainingPoseHint.textContent = "侧对镜头，便于捕捉头颈侧屈幅度";
+    return;
+  }
+  els.trainingPoseHint.textContent = "保持全身入镜，动作缓慢可控";
+}
+
 function queuePosePayload(frame) {
   if (!state.currentAction?.id || !state.autoPoseEnabled) return;
 
-  const now = Date.now();
-  if (now - state.lastPoseSentAt < window.APP_CONFIG.POSE_SEND_INTERVAL_MS) {
-    state.pendingPosePayload = {
-      action_id: state.currentAction.id,
-      keypoints: frame.keypoints,
-      visibility: frame.visibility,
-      timestamp: now,
-    };
+  const avgVisibility = averageVisibility(frame.visibility);
+  if (avgVisibility < window.APP_CONFIG.POSE_VISIBILITY_MIN) {
+    state.pendingPosePayload = null;
+    updatePoseFeedback({
+      feedback: ["请调整站位，确保全身入镜且光线充足"],
+      score: null,
+      status: "warning",
+    });
+    els.statusText.textContent = "检测受阻";
     return;
   }
 
-  state.pendingPosePayload = {
-    action_id: state.currentAction.id,
+  const now = Date.now();
+  const payload = {
+    action_id: getPoseActionId(state.currentAction),
     keypoints: frame.keypoints,
     visibility: frame.visibility,
     timestamp: now,
   };
+
+  if (now - state.lastPoseSentAt < window.APP_CONFIG.POSE_SEND_INTERVAL_MS) {
+    state.pendingPosePayload = payload;
+    return;
+  }
+
+  state.pendingPosePayload = payload;
   pumpPoseCorrection();
 }
 
@@ -722,20 +830,57 @@ async function pumpPoseCorrection() {
   }
 }
 
+function setCameraLoading(active, text = "正在准备…") {
+  if (els.cameraLoading) els.cameraLoading.hidden = !active;
+  if (els.cameraLoadingText) els.cameraLoadingText.textContent = text;
+  if (els.startCameraButton) els.startCameraButton.disabled = active;
+}
+
+function resetStartCameraButton() {
+  if (!els.startCameraButton) return;
+  els.startCameraButton.disabled = false;
+  els.startCameraButton.textContent = "启动摄像头";
+}
+
+async function ensurePoseTracker() {
+  if (!state.poseTracker) {
+    state.poseTracker = new PoseTracker({
+      video: els.video,
+      canvas: els.overlay,
+      onFrame: queuePosePayload,
+    });
+    await state.poseTracker.init();
+  }
+}
+
+function preloadPoseTracker() {
+  ensurePoseTracker().catch(() => {
+    // 预加载失败时留到用户点击「启动摄像头」再重试
+  });
+}
+
 function startTraining(action) {
   if (!window.APP_CONFIG.isPoseSupported(action.id)) {
     showToast("该动作暂不支持实时纠正，请选择支持的动作进行跟练。");
     return;
   }
+  stopPrescriptionLoading();
+  setLoading(false);
+  stopCamera();
+  setCameraLoading(false);
+  resetStartCameraButton();
+
   state.currentAction = action;
   els.trainingActionName.textContent = `${action.name} · ${action.sets} 组 × ${action.reps} 次`;
-  els.feedbackOverlay.textContent = "等待检测…";
+  updateTrainingPoseHint(action.id);
+  els.feedbackOverlay.textContent = "请先阅读拍摄建议，再启动摄像头";
   els.scoreBadge.textContent = "-- 分";
   els.feedbackList.innerHTML = "";
   els.statusText.textContent = "未开始";
   els.statusDot.className = "status-dot";
   els.videoShell.classList.remove("status-ok", "status-warning", "status-error");
   goToStep("training");
+  preloadPoseTracker();
 }
 
 async function startCamera() {
@@ -745,9 +890,12 @@ async function startCamera() {
   }
 
   try {
-    setLoading(true, "正在启动摄像头与姿态模型…");
+    setCameraLoading(true, "正在加载姿态模型…");
     stopCamera();
 
+    await ensurePoseTracker();
+
+    setCameraLoading(true, "正在启动摄像头…");
     const stream = await navigator.mediaDevices.getUserMedia({
       video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
       audio: false,
@@ -757,25 +905,21 @@ async function startCamera() {
     await els.video.play();
     els.videoShell.classList.add("camera-active");
 
-    if (!state.poseTracker) {
-      state.poseTracker = new PoseTracker({
-        video: els.video,
-        canvas: els.overlay,
-        onFrame: queuePosePayload,
-      });
-      await state.poseTracker.init();
-    }
-
     state.autoPoseEnabled = true;
     state.poseTracker.start();
+    els.feedbackOverlay.textContent = "等待检测…";
     els.statusText.textContent = "实时检测中";
-    showToast("摄像头与 MediaPipe 已启动，正在实时分析动作");
+    showToast("摄像头已启动，正在实时分析动作");
   } catch (error) {
+    stopCamera();
     showToast(error?.message?.includes("MediaPipe")
       ? "姿态模型加载失败，请检查网络后重试"
       : "无法访问摄像头，请检查浏览器权限");
   } finally {
-    setLoading(false);
+    setCameraLoading(false);
+    if (els.startCameraButton && state.cameraStream) {
+      els.startCameraButton.textContent = "重新启动摄像头";
+    }
   }
 }
 
@@ -790,29 +934,30 @@ function stopCamera() {
   }
   els.video.srcObject = null;
   els.videoShell.classList.remove("camera-active");
+  setCameraLoading(false);
 }
 
-async function simulatePoseDetection() {
-  if (!state.currentAction?.id) {
-    showToast("请先选择要跟练的动作");
+function completeTraining() {
+  stopCamera();
+  state.currentAction = null;
+  goToStep("prescription");
+  showToast("训练已完成，可继续跟练其他动作或返回问诊");
+}
+
+function setHeaderMenuOpen(open) {
+  if (!els.headerActions || !els.headerMenuToggle) return;
+  els.headerActions.classList.toggle("open", open);
+  els.headerMenuToggle.setAttribute("aria-expanded", open ? "true" : "false");
+  els.headerMenuToggle.textContent = open ? "收起" : "更多";
+}
+
+function applyDevModeUi() {
+  if (window.APP_CONFIG.DEV_MODE) {
+    document.body.classList.add("dev-mode");
     return;
   }
-
-  const demo = window.MockService.generateDemoKeypoints(state.currentAction.id);
-  try {
-    const result = await correctPose({
-      action_id: state.currentAction.id,
-      keypoints: demo.keypoints,
-      visibility: demo.visibility,
-      timestamp: Date.now(),
-    });
-    updatePoseFeedback(result);
-  } catch (error) {
-    updatePoseFeedback({
-      feedback: ["模拟检测失败，请确认后端服务可用"],
-      score: 0,
-      status: "error",
-    });
+  if (els.testDoubaoButton) {
+    els.testDoubaoButton.hidden = true;
   }
 }
 
@@ -906,20 +1051,17 @@ function bindEvents() {
     const submitButton = document.getElementById("submit-prescription");
     submitButton.disabled = true;
     submitButton.textContent = "生成中…";
-    setLoading(
-      true,
-      window.APP_CONFIG.DEMO_MODE
-        ? "正在生成本地 Mock 处方…"
-        : "正在调用豆包生成个性化处方，请稍候…"
-    );
+    startPrescriptionLoading();
 
     try {
       const prescription = await requestPrescription(formData);
       if (!prescription) {
+        stopPrescriptionLoading();
         return;
       }
       state.prescription = prescription;
       renderPrescription(prescription);
+      finishPrescriptionLoading();
       goToStep("prescription");
       showToast(
         prescription.source === "api"
@@ -927,6 +1069,7 @@ function bindEvents() {
           : "已使用本地 Mock 处方"
       );
     } catch (error) {
+      stopPrescriptionLoading();
       const isTimeout = error?.name === "AbortError";
       if (error?.status === 400) {
         if (error.message.includes("疼痛部位")) {
@@ -945,7 +1088,10 @@ function bindEvents() {
     } finally {
       submitButton.disabled = false;
       submitButton.textContent = "生成康复处方";
-      setLoading(false);
+      if (prescriptionProgressTimer) {
+        window.clearInterval(prescriptionProgressTimer);
+        prescriptionProgressTimer = null;
+      }
     }
   });
 
@@ -963,17 +1109,29 @@ function bindEvents() {
   });
 
   document.getElementById("start-camera").addEventListener("click", startCamera);
-  document.getElementById("simulate-pose").addEventListener("click", simulatePoseDetection);
-  document.getElementById("test-doubao").addEventListener("click", testDoubaoConnection);
+  els.testDoubaoButton?.addEventListener("click", testDoubaoConnection);
   document.getElementById("clear-doubao-result").addEventListener("click", hideDoubaoResult);
+  els.headerMenuToggle?.addEventListener("click", () => {
+    const open = !els.headerActions?.classList.contains("open");
+    setHeaderMenuOpen(open);
+  });
+  document.addEventListener("click", (event) => {
+    if (!els.headerActions?.classList.contains("open")) return;
+    if (event.target.closest(".header-actions") || event.target.closest("#header-menu-toggle")) {
+      return;
+    }
+    setHeaderMenuOpen(false);
+  });
   document.getElementById("toggle-demo").addEventListener("click", () => {
     window.APP_CONFIG.setDemoMode(!window.APP_CONFIG.DEMO_MODE);
     location.reload();
   });
   document.getElementById("stop-training").addEventListener("click", () => {
     stopCamera();
+    resetStartCameraButton();
     goToStep("prescription");
   });
+  document.getElementById("complete-training").addEventListener("click", completeTraining);
   els.logoutButton?.addEventListener("click", logoutSession);
 
   els.stepButtons().forEach((button) => {
@@ -996,6 +1154,7 @@ function init() {
 
   initPainRegions();
   bindEvents();
+  applyDevModeUi();
   updateModeBadge();
   updateAuthStatus();
   switchAuthTab("login");
