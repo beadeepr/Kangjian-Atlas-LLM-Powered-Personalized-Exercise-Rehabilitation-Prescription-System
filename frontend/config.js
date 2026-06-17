@@ -19,7 +19,9 @@ function readDevMode() {
 }
 
 window.APP_CONFIG = {
-  API_BASE: window.API_BASE || "http://localhost:8000/api",
+  API_BASE:
+    window.API_BASE ||
+    `${window.location.protocol}//${window.location.hostname}:8000/api`,
   DEMO_MODE: readDemoMode(),
   DEV_MODE: readDevMode(),
   FETCH_TIMEOUT_MS: 2000,

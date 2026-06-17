@@ -35,6 +35,7 @@ const els = {
   symptomsError: document.getElementById("symptoms-error"),
   painRegionsError: document.getElementById("pain-regions-error"),
   prescriptionMeta: document.getElementById("prescription-meta"),
+  prescriptionRecap: document.getElementById("prescription-recap"),
   prescriptionSummary: document.getElementById("prescription-summary"),
   actionList: document.getElementById("action-list"),
   prescriptionHistory: document.getElementById("prescription-history"),
@@ -280,6 +281,7 @@ function logoutSession() {
   state.prescription = null;
   state.currentAction = null;
   stopCamera();
+  clearPrescriptionSession();
   updateUserIdentity();
   if (els.prescriptionHistory) {
     els.prescriptionHistory.textContent = "请先登录后再查看历史处方。";
@@ -355,6 +357,7 @@ function stopPrescriptionLoading(resetOverlay = true) {
 function goToStep(step) {
   state.currentStep = step;
   setHeaderMenuOpen(false);
+  sessionStorage.setItem("kj_current_step", step);
   els.pages().forEach((page) => {
     page.classList.toggle("active", page.id === `page-${step}`);
   });
@@ -378,6 +381,60 @@ function goToStep(step) {
   if (step === "history") {
     loadPrescriptionHistory();
   }
+}
+
+function savePrescriptionToSession(prescription, formData) {
+  try {
+    sessionStorage.setItem("kj_prescription", JSON.stringify(prescription));
+    if (formData) sessionStorage.setItem("kj_form_data", JSON.stringify(formData));
+  } catch { /* quota exceeded or private mode */ }
+}
+
+function loadPrescriptionFromSession() {
+  try {
+    const raw = sessionStorage.getItem("kj_prescription");
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function loadFormDataFromSession() {
+  try {
+    const raw = sessionStorage.getItem("kj_form_data");
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+
+function clearPrescriptionSession() {
+  sessionStorage.removeItem("kj_prescription");
+  sessionStorage.removeItem("kj_form_data");
+  sessionStorage.removeItem("kj_current_step");
+}
+
+function getMobilityTier(score) {
+  if (score == null) return { label: "未评估", tier: "unknown" };
+  if (score <= 4) return { label: "低活动度 · 低强度方案", tier: "low" };
+  if (score <= 7) return { label: "中等活动度 · 常规方案", tier: "normal" };
+  return { label: "较高活动度 · 可适当增加频次", tier: "high" };
+}
+
+function renderPrescriptionRecap(formData) {
+  if (!els.prescriptionRecap || !formData) {
+    if (els.prescriptionRecap) els.prescriptionRecap.hidden = true;
+    return;
+  }
+  const mobility = getMobilityTier(formData.mobility_score);
+  const regions = formData.pain_regions?.length
+    ? formData.pain_regions.join("、")
+    : "未选择";
+  els.prescriptionRecap.hidden = false;
+  els.prescriptionRecap.innerHTML = `
+    <dl class="recap-grid">
+      <dt>疼痛部位</dt><dd>${regions}</dd>
+      <dt>主诉</dt><dd>${formData.symptoms || "未填写"}</dd>
+      <dt>伤病史</dt><dd>${formData.history || "无"}</dd>
+      <dt>活动度自评</dt><dd><span class="recap-mobility recap-mobility-${mobility.tier}">${formData.mobility_score ?? "—"}/10 · ${mobility.label}</span></dd>
+    </dl>
+  `;
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = window.APP_CONFIG.FETCH_TIMEOUT_MS) {
@@ -1060,7 +1117,9 @@ function bindEvents() {
         return;
       }
       state.prescription = prescription;
+      savePrescriptionToSession(prescription, formData);
       renderPrescription(prescription);
+      renderPrescriptionRecap(formData);
       finishPrescriptionLoading();
       goToStep("prescription");
       showToast(
@@ -1146,6 +1205,26 @@ function bindEvents() {
   });
 }
 
+function restoreSessionState() {
+  if (!isSessionReady()) return false;
+
+  const savedPrescription = loadPrescriptionFromSession();
+  const savedStep = sessionStorage.getItem("kj_current_step");
+  const savedFormData = loadFormDataFromSession();
+
+  if (savedPrescription && savedStep) {
+    state.prescription = savedPrescription;
+    renderPrescription(savedPrescription);
+    renderPrescriptionRecap(savedFormData);
+
+    const validSteps = ["prescription", "history", "intake"];
+    const targetStep = validSteps.includes(savedStep) ? savedStep : "prescription";
+    goToStep(targetStep);
+    return true;
+  }
+  return false;
+}
+
 function init() {
   state.auth = readStoredAuth();
   if (state.auth?.user) {
@@ -1160,8 +1239,11 @@ function init() {
   switchAuthTab("login");
 
   if (isSessionReady()) {
-    goToStep("intake");
+    if (!restoreSessionState()) {
+      goToStep("intake");
+    }
   } else {
+    clearPrescriptionSession();
     goToStep("login");
   }
 }
