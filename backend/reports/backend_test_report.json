@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-06-18T02:45:07.192466+00:00",
+  "total": 6,
+  "passed": 6,
+  "failed": 0,
+  "status": "passed",
+  "cases": [
+    {
+      "name": "健康检查",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "用户注册与登录",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "患者档案 CRUD",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "处方生成与导出",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "训练打卡与趋势统计",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "管理员知识库权限与维护",
+      "status": "passed",
+      "detail": "通过"
+    }
+  ],
+  "note": "覆盖健康检查、认证、患者档案、处方导出、训练打卡、管理员知识库维护等后端主流程。"
+}

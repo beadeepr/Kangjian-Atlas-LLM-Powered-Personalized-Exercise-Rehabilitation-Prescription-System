@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import os
+from datetime import date, timedelta
 
 
 PASSWORD_ALGORITHM = "pbkdf2_sha256"
@@ -46,6 +47,7 @@ def _user_response(user: models.UserModel) -> schema.UserResponse:
         id=user.id,
         account=user.account,
         nickname=user.nickname,
+        role=user.role,
         gender=user.gender,
         age=user.age,
     )
@@ -56,10 +58,16 @@ def get_user_by_account(db: Session, account: str):
 
 
 def create_user(db: Session, request: schema.UserCreateRequest) -> schema.UserResponse:
+    admin_accounts = {
+        account.strip().lower()
+        for account in os.getenv("ADMIN_ACCOUNTS", "admin").split(",")
+        if account.strip()
+    }
     user = models.UserModel(
         account=request.account,
         password_hash=_hash_password(request.password),
         nickname=request.nickname,
+        role="admin" if request.account.lower() in admin_accounts else "user",
         gender=request.gender,
         age=request.age,
     )
@@ -74,6 +82,180 @@ def authenticate_user(db: Session, request: schema.UserLoginRequest):
     if not user or not _verify_password(request.password, user.password_hash):
         return None
     return user
+
+
+def list_patient_profiles(db: Session, user_id: int):
+    return (
+        db.query(models.PatientProfileModel)
+        .filter(models.PatientProfileModel.user_id == user_id)
+        .order_by(models.PatientProfileModel.updated_at.desc())
+        .all()
+    )
+
+
+def get_patient_profile(db: Session, profile_id: int, user_id: int):
+    return (
+        db.query(models.PatientProfileModel)
+        .filter(
+            models.PatientProfileModel.id == profile_id,
+            models.PatientProfileModel.user_id == user_id,
+        )
+        .first()
+    )
+
+
+def create_patient_profile(db: Session, request: schema.PatientProfileCreateRequest, user_id: int):
+    profile = models.PatientProfileModel(
+        user_id=user_id,
+        name=request.name,
+        gender=request.gender,
+        age=request.age,
+        phone=request.phone,
+        height_cm=request.height_cm,
+        weight_kg=request.weight_kg,
+        pain_regions=request.pain_regions,
+        history=request.history,
+        allergy_history=request.allergy_history,
+        surgery_history=request.surgery_history,
+        rehab_goal=request.rehab_goal,
+        note=request.note,
+    )
+    db.add(profile)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+def update_patient_profile(
+    db: Session,
+    profile: models.PatientProfileModel,
+    request: schema.PatientProfileUpdateRequest,
+):
+    data = request.model_dump(exclude_unset=True) if hasattr(request, "model_dump") else request.dict(exclude_unset=True)
+    for field, value in data.items():
+        setattr(profile, field, value)
+    db.commit()
+    db.refresh(profile)
+    return profile
+
+
+def delete_patient_profile(db: Session, profile: models.PatientProfileModel):
+    db.delete(profile)
+    db.commit()
+
+
+def list_training_checkins(
+    db: Session,
+    user_id: int,
+    patient_profile_id: int | None = None,
+    start_date: date | None = None,
+    end_date: date | None = None,
+):
+    query = db.query(models.TrainingCheckinModel).filter(models.TrainingCheckinModel.user_id == user_id)
+    if patient_profile_id is not None:
+        query = query.filter(models.TrainingCheckinModel.patient_profile_id == patient_profile_id)
+    if start_date is not None:
+        query = query.filter(models.TrainingCheckinModel.trained_on >= start_date)
+    if end_date is not None:
+        query = query.filter(models.TrainingCheckinModel.trained_on <= end_date)
+    return query.order_by(models.TrainingCheckinModel.trained_on.desc(), models.TrainingCheckinModel.id.desc()).all()
+
+
+def get_training_checkin(db: Session, checkin_id: int, user_id: int):
+    return (
+        db.query(models.TrainingCheckinModel)
+        .filter(
+            models.TrainingCheckinModel.id == checkin_id,
+            models.TrainingCheckinModel.user_id == user_id,
+        )
+        .first()
+    )
+
+
+def create_training_checkin(db: Session, request: schema.TrainingCheckinCreateRequest, user_id: int):
+    checkin = models.TrainingCheckinModel(
+        user_id=user_id,
+        patient_profile_id=request.patient_profile_id,
+        prescription_id=request.prescription_id,
+        action_id=request.action_id,
+        action_name=request.action_name,
+        trained_on=request.trained_on,
+        duration_minutes=request.duration_minutes,
+        completed_sets=request.completed_sets,
+        completed_reps=request.completed_reps,
+        pain_before=request.pain_before,
+        pain_after=request.pain_after,
+        difficulty=request.difficulty,
+        score=request.score,
+        note=request.note,
+    )
+    db.add(checkin)
+    db.commit()
+    db.refresh(checkin)
+    return checkin
+
+
+def update_training_checkin(
+    db: Session,
+    checkin: models.TrainingCheckinModel,
+    request: schema.TrainingCheckinUpdateRequest,
+):
+    data = request.model_dump(exclude_unset=True) if hasattr(request, "model_dump") else request.dict(exclude_unset=True)
+    for field, value in data.items():
+        setattr(checkin, field, value)
+    db.commit()
+    db.refresh(checkin)
+    return checkin
+
+
+def delete_training_checkin(db: Session, checkin: models.TrainingCheckinModel):
+    db.delete(checkin)
+    db.commit()
+
+
+def build_training_trends(
+    db: Session,
+    user_id: int,
+    start_date: date,
+    end_date: date,
+    patient_profile_id: int | None = None,
+):
+    checkins = list_training_checkins(
+        db,
+        user_id=user_id,
+        patient_profile_id=patient_profile_id,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    grouped: dict[date, list[models.TrainingCheckinModel]] = {}
+    for checkin in checkins:
+        grouped.setdefault(checkin.trained_on, []).append(checkin)
+
+    points = []
+    current = start_date
+    while current <= end_date:
+        items = grouped.get(current, [])
+        points.append(_training_trend_point(current, items))
+        current += timedelta(days=1)
+    return points
+
+
+def _average(values):
+    values = [value for value in values if value is not None]
+    if not values:
+        return None
+    return round(sum(values) / len(values), 1)
+
+
+def _training_trend_point(day: date, checkins: list[models.TrainingCheckinModel]):
+    return {
+        "date": day,
+        "checkin_count": len(checkins),
+        "total_duration_minutes": sum(item.duration_minutes or 0 for item in checkins),
+        "avg_pain_before": _average([item.pain_before for item in checkins]),
+        "avg_pain_after": _average([item.pain_after for item in checkins]),
+        "avg_score": _average([item.score for item in checkins]),
+    }
 
 
 def _action_to_dict(action: schema.ActionItem):
@@ -100,7 +282,12 @@ def list_prescriptions(db: Session, user_id: int | None = None):
     return query.order_by(models.PrescriptionModel.created_at.desc()).all()
 
 
-def create_prescription(db: Session, prescription: schema.PrescriptionRequest, user_id: int | None = None):
+def create_prescription(
+    db: Session,
+    prescription: schema.PrescriptionRequest,
+    user_id: int | None = None,
+    patient_profile_id: int | None = None,
+):
     from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_prescription
     from .doubao import generate_prescription_summary
 
@@ -140,6 +327,7 @@ def create_prescription(db: Session, prescription: schema.PrescriptionRequest, u
 
     db_prescription = models.PrescriptionModel(
         user_id=user_id,
+        patient_profile_id=patient_profile_id,
         patient_name=prescription.name,
         patient_age=prescription.age,
         symptoms=prescription.symptoms,

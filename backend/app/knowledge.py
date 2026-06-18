@@ -31,6 +31,55 @@ def load_action_catalog() -> List[dict]:
     return data.get("actions", [])
 
 
+def save_action_catalog(actions: List[dict]) -> None:
+    actions_file = BASE_DIR / "knowledge" / "actions.json"
+    payload = {"actions": actions}
+    actions_file.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def get_action_payload(action_id: str) -> Optional[dict]:
+    for action in load_action_catalog():
+        if action.get("id") == action_id:
+            return action
+    return None
+
+
+def create_action_payload(action: dict) -> dict:
+    actions = load_action_catalog()
+    if any(item.get("id") == action.get("id") for item in actions):
+        raise ValueError("action id already exists")
+    actions.append(action)
+    save_action_catalog(actions)
+    return action
+
+
+def update_action_payload(action_id: str, updates: dict) -> Optional[dict]:
+    actions = load_action_catalog()
+    for index, action in enumerate(actions):
+        if action.get("id") != action_id:
+            continue
+        next_action = {**action, **updates}
+        next_id = next_action.get("id")
+        if next_id != action_id and any(item.get("id") == next_id for item in actions):
+            raise ValueError("action id already exists")
+        actions[index] = next_action
+        save_action_catalog(actions)
+        return next_action
+    return None
+
+
+def delete_action_payload(action_id: str) -> bool:
+    actions = load_action_catalog()
+    next_actions = [action for action in actions if action.get("id") != action_id]
+    if len(next_actions) == len(actions):
+        return False
+    save_action_catalog(next_actions)
+    return True
+
+
 def load_action_library() -> List[ActionItem]:
     actions_file = BASE_DIR / 'knowledge' / 'actions.json'
     with open(actions_file, 'r', encoding='utf-8') as f:
