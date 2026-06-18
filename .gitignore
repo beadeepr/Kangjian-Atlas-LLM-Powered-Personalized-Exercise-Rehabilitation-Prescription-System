@@ -4,6 +4,7 @@ __pycache__/
 
 # SQLite database
 backend/database.db
+backend/reports/*.db
 
 # Local secrets
 .env

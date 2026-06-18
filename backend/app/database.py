@@ -1,11 +1,13 @@
 from pathlib import Path
+import os
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import sessionmaker
 
 BASE_DIR = Path(__file__).resolve().parents[1]
-SQLALCHEMY_DATABASE_URL = f"sqlite:///{BASE_DIR / 'database.db'}"
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'database.db'}")
 
-engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False})
+connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
+engine = create_engine(SQLALCHEMY_DATABASE_URL, connect_args=connect_args)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 
@@ -16,9 +18,19 @@ def init_db():
     _ensure_sqlite_columns()
 
 
+def check_database() -> bool:
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+
+
 def _ensure_sqlite_columns():
     inspector = inspect(engine)
-    if "prescriptions" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "prescriptions" not in table_names:
         return
     columns = {column["name"] for column in inspector.get_columns("prescriptions")}
     statements = []
@@ -26,6 +38,13 @@ def _ensure_sqlite_columns():
         statements.append("ALTER TABLE prescriptions ADD COLUMN raw_response JSON")
     if "user_id" not in columns:
         statements.append("ALTER TABLE prescriptions ADD COLUMN user_id INTEGER")
+    if "patient_profile_id" not in columns:
+        statements.append("ALTER TABLE prescriptions ADD COLUMN patient_profile_id INTEGER")
+
+    if "users" in table_names:
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        if "role" not in user_columns:
+            statements.append("ALTER TABLE users ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'user'")
 
     if not statements:
         return

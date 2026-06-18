@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, JSON, String, Text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -15,6 +15,7 @@ class PrescriptionModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    patient_profile_id = Column(Integer, ForeignKey('patient_profiles.id'), nullable=True, index=True)
     patient_name = Column(String(128), nullable=True)
     patient_age = Column(Integer, nullable=True)
     symptoms = Column(Text, nullable=False)
@@ -26,6 +27,8 @@ class PrescriptionModel(Base):
 
     actions = relationship('ActionModel', back_populates='prescription', cascade='all, delete-orphan')
     user = relationship('UserModel', back_populates='prescriptions')
+    patient_profile = relationship('PatientProfileModel', back_populates='prescriptions')
+    training_checkins = relationship('TrainingCheckinModel', back_populates='prescription')
 
 
 class ActionModel(Base):
@@ -59,9 +62,63 @@ class UserModel(Base):
     account = Column(String(64), unique=True, nullable=False, index=True)
     password_hash = Column(String(256), nullable=False)
     nickname = Column(String(64), nullable=False)
+    role = Column(String(32), nullable=False, default='user')
     gender = Column(String(16), nullable=True)
     age = Column(Integer, nullable=True)
     created_at = Column(DateTime, default=now)
     updated_at = Column(DateTime, default=now, onupdate=now)
 
     prescriptions = relationship('PrescriptionModel', back_populates='user')
+    patient_profiles = relationship('PatientProfileModel', back_populates='user', cascade='all, delete-orphan')
+    training_checkins = relationship('TrainingCheckinModel', back_populates='user', cascade='all, delete-orphan')
+
+
+class PatientProfileModel(Base):
+    __tablename__ = 'patient_profiles'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    name = Column(String(128), nullable=False)
+    gender = Column(String(16), nullable=True)
+    age = Column(Integer, nullable=True)
+    phone = Column(String(32), nullable=True)
+    height_cm = Column(Integer, nullable=True)
+    weight_kg = Column(Integer, nullable=True)
+    pain_regions = Column(JSON, nullable=True)
+    history = Column(Text, nullable=True)
+    allergy_history = Column(Text, nullable=True)
+    surgery_history = Column(Text, nullable=True)
+    rehab_goal = Column(Text, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
+
+    user = relationship('UserModel', back_populates='patient_profiles')
+    prescriptions = relationship('PrescriptionModel', back_populates='patient_profile')
+    training_checkins = relationship('TrainingCheckinModel', back_populates='patient_profile')
+
+
+class TrainingCheckinModel(Base):
+    __tablename__ = 'training_checkins'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    patient_profile_id = Column(Integer, ForeignKey('patient_profiles.id'), nullable=True, index=True)
+    prescription_id = Column(Integer, ForeignKey('prescriptions.id'), nullable=True, index=True)
+    action_id = Column(String(128), nullable=True)
+    action_name = Column(String(128), nullable=False)
+    trained_on = Column(Date, nullable=False, index=True)
+    duration_minutes = Column(Integer, nullable=True)
+    completed_sets = Column(Integer, nullable=True)
+    completed_reps = Column(Integer, nullable=True)
+    pain_before = Column(Integer, nullable=True)
+    pain_after = Column(Integer, nullable=True)
+    difficulty = Column(Integer, nullable=True)
+    score = Column(Integer, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
+
+    user = relationship('UserModel', back_populates='training_checkins')
+    patient_profile = relationship('PatientProfileModel', back_populates='training_checkins')
+    prescription = relationship('PrescriptionModel', back_populates='training_checkins')
