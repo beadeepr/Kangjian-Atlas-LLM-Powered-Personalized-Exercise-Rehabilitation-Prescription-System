@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>康健图谱 - 个性化运动康复处方</title>
-    <link rel="stylesheet" href="style.css?v=20260617" />
+    <link rel="stylesheet" href="style.css?v=20260618" />
   </head>
   <body>
     <header class="app-header">
@@ -244,6 +244,15 @@
 
           <aside class="training-side">
             <div class="training-tips">
+              <h3 class="training-tips-title">动作参考</h3>
+              <div class="training-action-ref" id="training-action-ref" hidden>
+                <div class="training-action-ref-image">
+                  <img id="training-action-image" alt="" loading="lazy" onerror="handleActionImageError(this)" />
+                  <span class="action-image-placeholder">示意图待上传</span>
+                </div>
+                <p id="training-action-desc" class="hint"></p>
+                <a id="training-action-video" class="action-video-link" href="#" target="_blank" rel="noopener noreferrer" hidden>观看示范视频</a>
+              </div>
               <h3 class="training-tips-title">拍摄建议</h3>
               <ul class="training-tips-list">
                 <li>距摄像头 1.5–2 米，确保头、躯干与四肢完整入镜</li>
@@ -281,8 +290,8 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="config.js?v=20260617"></script>
-    <script src="mock.js?v=20260617"></script>
-    <script type="module" src="app.js?v=20260617"></script>
+    <script src="config.js?v=20260618"></script>
+    <script src="mock.js?v=20260618"></script>
+    <script type="module" src="app.js?v=20260618"></script>
   </body>
 </html>

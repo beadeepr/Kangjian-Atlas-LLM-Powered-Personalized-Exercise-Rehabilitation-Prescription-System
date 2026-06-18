@@ -48,6 +48,10 @@ const els = {
   loadingProgressBar: document.getElementById("loading-progress-bar"),
   loadingPercent: document.getElementById("loading-percent"),
   trainingActionName: document.getElementById("training-action-name"),
+  trainingActionRef: document.getElementById("training-action-ref"),
+  trainingActionImage: document.getElementById("training-action-image"),
+  trainingActionDesc: document.getElementById("training-action-desc"),
+  trainingActionVideo: document.getElementById("training-action-video"),
   trainingPoseHint: document.getElementById("training-pose-hint"),
   videoShell: document.getElementById("video-shell"),
   video: document.getElementById("video"),
@@ -679,6 +683,23 @@ async function requestPrescription(formData) {
   };
 }
 
+function handleActionImageError(img) {
+  img.classList.add("is-missing");
+  img.removeAttribute("src");
+  img.setAttribute("aria-label", "示意图待上传");
+}
+window.handleActionImageError = handleActionImageError;
+
+function renderActionVideoMarkup(action) {
+  if (action.videoUrl) {
+    return `<a class="action-video-link" href="${action.videoUrl}" target="_blank" rel="noopener noreferrer">观看示范视频</a>`;
+  }
+  if (action.videoHint) {
+    return `<p class="hint action-video-hint"><strong>示范视频：</strong>${action.videoHint}</p>`;
+  }
+  return "";
+}
+
 function renderPrescription(prescription) {
   const metaParts = [];
   if (prescription.id) metaParts.push(`处方编号 #${prescription.id}`);
@@ -695,17 +716,27 @@ function renderPrescription(prescription) {
     const card = document.createElement("article");
     card.className = "action-card card";
     card.innerHTML = `
-      <img src="${window.APP_CONFIG.assetUrl(action.image)}" alt="${action.name}示意图" />
+      <div class="action-image-wrap">
+        <img
+          src="${window.APP_CONFIG.assetUrl(action.image)}"
+          alt="${action.name}示意图"
+          loading="lazy"
+          onerror="handleActionImageError(this)"
+        />
+        <span class="action-image-placeholder">示意图待上传</span>
+      </div>
       <div class="action-card-body">
         <h3>${action.name}</h3>
         <div class="action-meta">
           <span class="tag">${action.sets} 组</span>
           <span class="tag">${action.reps} 次/组</span>
+          ${action.frequency ? `<span class="tag tag-frequency">${action.frequency}</span>` : ""}
           <span class="tag ${poseSupported ? "tag-supported" : "tag-pending"}">
             ${poseSupported ? "支持实时纠正" : "暂不支持实时纠正"}
           </span>
         </div>
         <p>${action.description || "按医嘱缓慢完成动作，注意呼吸节奏。"}</p>
+        ${renderActionVideoMarkup(action)}
         ${
           action.note
             ? `<p><strong>注意：</strong>${action.note}</p>`
@@ -724,7 +755,7 @@ function renderPrescription(prescription) {
             : `<button class="btn btn-secondary unsupported-training" type="button" data-action-id="${action.id || ""}">
           仅查看处方
         </button>
-        <p class="hint support-hint">当前版本实时纠正仅支持“靠墙静蹲”和“颈部侧屈拉伸”。</p>`
+        <p class="hint support-hint">${window.APP_CONFIG.getUnsupportedPoseHint()}</p>`
         }
       </div>
     `;
@@ -820,16 +851,28 @@ function getPoseActionId(action) {
 
 function updateTrainingPoseHint(actionId) {
   if (!els.trainingPoseHint) return;
-  const catalogId = window.APP_CONFIG.normalizeCatalogActionId(actionId);
-  if (catalogId === "wall_squat") {
-    els.trainingPoseHint.textContent = "侧对镜头，便于观察膝部弯曲角度";
-    return;
+  els.trainingPoseHint.textContent = window.APP_CONFIG.getPoseCameraHint(actionId);
+}
+
+function updateTrainingActionRef(action) {
+  if (!els.trainingActionRef) return;
+  els.trainingActionRef.hidden = false;
+  if (els.trainingActionImage) {
+    els.trainingActionImage.classList.remove("is-missing");
+    els.trainingActionImage.src = window.APP_CONFIG.assetUrl(action.image);
+    els.trainingActionImage.alt = `${action.name}参考示意图`;
   }
-  if (catalogId === "neck_side_bend") {
-    els.trainingPoseHint.textContent = "侧对镜头，便于捕捉头颈侧屈幅度";
-    return;
+  if (els.trainingActionDesc) {
+    els.trainingActionDesc.textContent = action.description || "";
   }
-  els.trainingPoseHint.textContent = "保持全身入镜，动作缓慢可控";
+  if (els.trainingActionVideo) {
+    if (action.videoUrl) {
+      els.trainingActionVideo.href = action.videoUrl;
+      els.trainingActionVideo.hidden = false;
+    } else {
+      els.trainingActionVideo.hidden = true;
+    }
+  }
 }
 
 function queuePosePayload(frame) {
@@ -928,8 +971,9 @@ function startTraining(action) {
   resetStartCameraButton();
 
   state.currentAction = action;
-  els.trainingActionName.textContent = `${action.name} · ${action.sets} 组 × ${action.reps} 次`;
+  els.trainingActionName.textContent = `${action.name} · ${action.sets} 组 × ${action.reps} 次${action.frequency ? ` · ${action.frequency}` : ""}`;
   updateTrainingPoseHint(action.id);
+  updateTrainingActionRef(action);
   els.feedbackOverlay.textContent = "请先阅读拍摄建议，再启动摄像头";
   els.scoreBadge.textContent = "-- 分";
   els.feedbackList.innerHTML = "";

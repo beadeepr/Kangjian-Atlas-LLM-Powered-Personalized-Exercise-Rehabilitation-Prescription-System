@@ -10,18 +10,21 @@ function resolveActionId(action) {
 
 function enrichAction(action) {
   const rawId = resolveRawActionId(action);
-  const id = rawId ? window.APP_CONFIG.normalizeCatalogActionId(rawId) : null;
-  const catalog = id ? window.ACTION_CATALOG[id] : null;
+  const catalog = rawId ? window.ACTION_CATALOG[rawId] : null;
+  const catalogId = catalog?.id || rawId;
   return {
-    id,
+    id: catalogId,
     backendId: rawId ? window.APP_CONFIG.getBackendActionId(rawId) : null,
-    name: action.name,
+    name: action.name || catalog?.name || "康复动作",
     sets: action.sets ?? catalog?.sets ?? 3,
     reps: action.reps ?? catalog?.reps ?? 10,
+    frequency: action.frequency ?? catalog?.frequency ?? "",
     note: action.note ?? "",
     description: catalog?.description ?? action.note ?? "",
     contraindications: catalog?.contraindications ?? "",
-    image: catalog?.image ?? "assets/exercise_generic.svg",
+    image: catalog?.image ?? (rawId ? window.APP_CONFIG.actionImage(rawId) : ""),
+    videoUrl: catalog?.videoUrl || "",
+    videoHint: catalog?.videoHint || "",
   };
 }
 
@@ -57,9 +60,9 @@ function selectActionsForPrescription(formData) {
   if (selected.length < 2) {
     const regionDefaults = {
       颈部: ["neck_side_bend", "chin_tuck"],
-      肩部: ["shoulder_roll", "neck_side_bend"],
+      肩部: ["scapular_retraction", "neck_side_bend"],
       腰部: ["cat_cow", "pelvic_tilt"],
-      膝关节: ["wall_squat", "calf_stretch"],
+      膝关节: ["wall_squat", "straight_leg_raise"],
       踝关节: ["ankle_pump", "calf_stretch"],
     };
     const fallbackIds = [];
