@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>康健图谱 - 个性化运动康复处方</title>
-    <link rel="stylesheet" href="style.css?v=20260618" />
+    <link rel="stylesheet" href="style.css?v=20260619" />
   </head>
   <body>
     <header class="app-header">
@@ -25,6 +25,7 @@
         <span class="mode-badge demo" id="mode-badge">Demo 模式</span>
         <button class="btn btn-secondary btn-small" id="toggle-demo" type="button">切换 API 模式</button>
         <button class="btn btn-secondary btn-small dev-only" id="test-doubao" type="button">测试豆包</button>
+        <button class="btn btn-secondary btn-small" id="go-admin" type="button" hidden>管理后台</button>
         <button class="btn btn-secondary btn-small" id="logout-button" type="button" hidden>退出登录</button>
       </div>
       <button
@@ -133,6 +134,15 @@
         </div>
 
         <form id="intake-form" class="card form-grid" novalidate>
+          <div class="field field-full" id="patient-profile-field">
+            <label for="patient-profile-select">关联患者档案</label>
+            <select id="patient-profile-select" name="patient_profile_id" aria-label="关联患者档案">
+              <option value="">不关联患者档案（使用当前账号信息）</option>
+            </select>
+            <span class="field-hint">可选：选择已有档案生成处方，或在下方填写后保存为新档案。</span>
+            <button class="btn btn-secondary btn-small" id="save-patient-profile" type="button">将当前问诊保存为新档案</button>
+          </div>
+
           <div class="field field-full">
             <label for="symptoms">主诉 <span class="required">*</span></label>
             <textarea
@@ -188,6 +198,10 @@
           <p id="prescription-meta" class="summary-meta"></p>
           <div id="prescription-recap" class="prescription-recap" hidden></div>
           <div id="prescription-summary" class="summary-block"></div>
+          <div class="prescription-export-bar" id="prescription-export-bar" hidden>
+            <button class="btn btn-secondary btn-small" id="export-prescription-md" type="button">导出处方 MD</button>
+            <button class="btn btn-secondary btn-small" id="export-prescription-json" type="button">导出处方 JSON</button>
+          </div>
         </div>
 
         <div id="action-list" class="action-grid"></div>
@@ -202,6 +216,10 @@
         <div class="page-head">
           <h2 id="history-title">历史处方</h2>
           <p>按当前登录用户筛选并查看过往处方记录，便于回顾训练过程。</p>
+        </div>
+
+        <div class="history-section card training-stats-panel" id="training-stats-panel" hidden>
+          <p class="hint">正在加载训练统计…</p>
         </div>
 
         <div class="history-section card">
@@ -268,12 +286,40 @@
               </div>
               <ul class="feedback-list" id="feedback-list"></ul>
             </div>
+            <div class="training-side-card" id="training-checkin-card">
+              <h3 class="training-side-title">训练打卡</h3>
+              <p class="hint">完成跟练后填写疼痛变化，系统将自动保存打卡记录。</p>
+              <div class="checkin-grid">
+                <label>训练前疼痛 (0-10)
+                  <input id="checkin-pain-before" type="number" min="0" max="10" placeholder="可选" />
+                </label>
+                <label>训练后疼痛 (0-10)
+                  <input id="checkin-pain-after" type="number" min="0" max="10" placeholder="可选" />
+                </label>
+              </div>
+              <label class="checkin-note-label">备注
+                <input id="checkin-note" type="text" placeholder="例如：膝部酸胀减轻" />
+              </label>
+            </div>
             <div class="training-actions">
               <button class="btn btn-primary btn-block" id="start-camera" type="button">启动摄像头</button>
               <button class="btn btn-secondary btn-block" id="stop-training" type="button">返回处方</button>
               <button class="btn btn-success btn-block" id="complete-training" type="button">完成训练，返回处方</button>
             </div>
           </aside>
+        </div>
+      </section>
+
+      <section id="page-admin" class="page" aria-labelledby="admin-title">
+        <div class="page-head">
+          <h2 id="admin-title">管理后台</h2>
+          <p>管理员可查看知识库动作概览与部署状态（完整维护请使用 API 文档）。</p>
+        </div>
+        <div class="card admin-panel" id="admin-actions-panel">
+          <p class="hint">正在加载…</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-from-admin" type="button">返回问诊</button>
         </div>
       </section>
     </main>
@@ -290,8 +336,8 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="config.js?v=20260618"></script>
-    <script src="mock.js?v=20260618"></script>
-    <script type="module" src="app.js?v=20260618"></script>
+    <script src="config.js?v=20260619"></script>
+    <script src="mock.js?v=20260619"></script>
+    <script type="module" src="app.js?v=20260619"></script>
   </body>
 </html>

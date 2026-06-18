@@ -14,6 +14,9 @@ const state = {
   currentUser: null,
   auth: null,
   authTab: "login",
+  selectedPatientProfileId: null,
+  patientProfiles: [],
+  trainingLastScore: null,
 };
 
 const els = {
@@ -78,6 +81,14 @@ const els = {
   testDoubaoButton: document.getElementById("test-doubao"),
   headerActions: document.getElementById("header-actions"),
   headerMenuToggle: document.getElementById("header-menu-toggle"),
+  patientProfileSelect: document.getElementById("patient-profile-select"),
+  prescriptionExportBar: document.getElementById("prescription-export-bar"),
+  trainingStatsPanel: document.getElementById("training-stats-panel"),
+  checkinPainBefore: document.getElementById("checkin-pain-before"),
+  checkinPainAfter: document.getElementById("checkin-pain-after"),
+  checkinNote: document.getElementById("checkin-note"),
+  adminEntryButton: document.getElementById("go-admin"),
+  adminActionsPanel: document.getElementById("admin-actions-panel"),
 };
 
 function readStoredAuth() {
@@ -107,8 +118,10 @@ function syncCurrentUserFromAuth() {
     name: state.auth.user.nickname,
     age: state.auth.user.age ?? null,
     gender: state.auth.user.gender ?? null,
+    role: state.auth.user.role ?? "user",
   };
   updateUserIdentity();
+  updateAdminEntry();
 }
 
 function isSessionReady() {
@@ -257,6 +270,8 @@ async function submitAuth(mode) {
       const loginData = await loginResponse.json();
       saveAuth({ token: loginData.token, user: loginData.user });
       showToast(`欢迎你，${loginData.user.nickname}`);
+      loadPatientProfiles();
+      updateAdminEntry();
       goToStep("intake");
       return;
     }
@@ -264,6 +279,8 @@ async function submitAuth(mode) {
     const data = await response.json();
     saveAuth({ token: data.token, user: data.user });
     showToast(`欢迎你，${data.user.nickname}`);
+    loadPatientProfiles();
+    updateAdminEntry();
     goToStep("intake");
   } catch (error) {
     const isNetworkError = error instanceof TypeError;
@@ -384,6 +401,19 @@ function goToStep(step) {
   updateUserIdentity();
   if (step === "history") {
     loadPrescriptionHistory();
+    loadTrainingStats();
+  }
+  if (step === "admin") {
+    loadAdminActions();
+  }
+  if (step === "intake") {
+    loadPatientProfiles();
+    if (els.patientProfileSelect?.closest(".field")) {
+      els.patientProfileSelect.closest(".field").hidden = window.APP_CONFIG.DEMO_MODE;
+    }
+  }
+  if (step === "prescription") {
+    updatePrescriptionExportBar();
   }
 }
 
@@ -453,6 +483,7 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = window.APP_CONFIG
 
 function readFormData() {
   const formData = new FormData(els.intakeForm);
+  const profileId = els.patientProfileSelect?.value;
   return {
     name: state.currentUser?.name || null,
     age: state.currentUser?.age || null,
@@ -460,6 +491,7 @@ function readFormData() {
     history: formData.get("history")?.toString().trim() || null,
     pain_regions: Array.from(state.selectedPainRegions),
     mobility_score: Number(formData.get("mobility_score") || 5),
+    patient_profile_id: profileId ? Number(profileId) : null,
   };
 }
 
@@ -556,6 +588,203 @@ function hideDoubaoResult() {
   els.doubaoResult.textContent = "";
 }
 
+function updateAdminEntry() {
+  const isAdmin = state.currentUser?.role === "admin";
+  if (els.adminEntryButton) {
+    els.adminEntryButton.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
+  }
+}
+
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+async function loadPatientProfiles() {
+  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE || !els.patientProfileSelect) return;
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/patient_profiles`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) return;
+    state.patientProfiles = await response.json();
+    renderPatientProfileSelect();
+  } catch {
+    // 患者档案为可选能力，加载失败不阻断问诊
+  }
+}
+
+function renderPatientProfileSelect() {
+  if (!els.patientProfileSelect) return;
+  const options = [
+    `<option value="">不关联患者档案（使用当前账号信息）</option>`,
+    ...state.patientProfiles.map(
+      (profile) =>
+        `<option value="${profile.id}"${state.selectedPatientProfileId === profile.id ? " selected" : ""}>${profile.name}${profile.age ? ` · ${profile.age}岁` : ""}</option>`
+    ),
+  ];
+  els.patientProfileSelect.innerHTML = options.join("");
+}
+
+async function createPatientProfileFromIntake(formData) {
+  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) return null;
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/patient_profiles`,
+    {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify({
+        name: formData.name || state.currentUser?.name || "未命名患者",
+        age: formData.age ?? state.currentUser?.age ?? null,
+        gender: state.currentUser?.gender ?? null,
+        pain_regions: formData.pain_regions,
+        history: formData.history,
+      }),
+    }
+  );
+  if (!response.ok) return null;
+  const profile = await response.json();
+  state.patientProfiles.push(profile);
+  state.selectedPatientProfileId = profile.id;
+  renderPatientProfileSelect();
+  return profile;
+}
+
+async function exportPrescription(format) {
+  const prescriptionId = state.prescription?.id;
+  if (!prescriptionId || window.APP_CONFIG.DEMO_MODE) {
+    showToast("请先登录并在 API 模式下生成可导出的处方");
+    return;
+  }
+  if (!requireLogin()) return;
+  try {
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/prescriptions/${prescriptionId}/export?format=${format}`,
+      { headers: authHeaders() }
+    );
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `prescription_${prescriptionId}.${format}`;
+    link.click();
+    URL.revokeObjectURL(url);
+    showToast(`处方已导出为 ${format.toUpperCase()}`);
+  } catch {
+    showToast("处方导出失败，请确认已登录且后端可用");
+  }
+}
+
+async function submitTrainingCheckin(action, options = {}) {
+  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) return null;
+  const payload = {
+    prescription_id: state.prescription?.id ?? null,
+    patient_profile_id: state.prescription?.patient_profile_id ?? state.selectedPatientProfileId ?? null,
+    action_id: getPoseActionId(action),
+    action_name: action.name,
+    trained_on: todayIsoDate(),
+    completed_sets: action.sets ?? null,
+    completed_reps: action.reps ?? null,
+    pain_before: options.painBefore ?? null,
+    pain_after: options.painAfter ?? null,
+    score: options.score ?? state.trainingLastScore ?? null,
+    note: options.note || null,
+  };
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/training_checkins`,
+    {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    }
+  );
+  if (!response.ok) {
+    const detail = await parseApiError(response);
+    throw new Error(detail || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+async function loadTrainingStats() {
+  if (!els.trainingStatsPanel) return;
+  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) {
+    els.trainingStatsPanel.hidden = true;
+    return;
+  }
+  els.trainingStatsPanel.hidden = false;
+  els.trainingStatsPanel.innerHTML = `<p class="hint">正在加载训练统计…</p>`;
+  try {
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/training_checkins/visualization?days=30`,
+      { headers: authHeaders() }
+    );
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const data = await response.json();
+    const trend = data.trend?.points || [];
+    const recent = trend.slice(-7);
+    els.trainingStatsPanel.innerHTML = `
+      <h3>训练统计（近 30 天）</h3>
+      <div class="stats-grid">
+        <div class="stat-card"><span class="stat-value">${data.total_checkins}</span><span class="stat-label">打卡次数</span></div>
+        <div class="stat-card"><span class="stat-value">${data.active_days}</span><span class="stat-label">活跃天数</span></div>
+        <div class="stat-card"><span class="stat-value">${data.total_duration_minutes}</span><span class="stat-label">累计分钟</span></div>
+        <div class="stat-card"><span class="stat-value">${data.avg_score ?? "—"}</span><span class="stat-label">平均得分</span></div>
+      </div>
+      ${
+        recent.length
+          ? `<ul class="trend-list">${recent
+              .map(
+                (point) =>
+                  `<li><strong>${point.date}</strong>：打卡 ${point.checkin_count} 次，时长 ${point.total_duration_minutes} 分钟${
+                    point.avg_score != null ? `，均分 ${point.avg_score}` : ""
+                  }</li>`
+              )
+              .join("")}</ul>`
+          : `<p class="hint">暂无训练打卡记录，完成跟练后会自动记录。</p>`
+      }
+    `;
+  } catch {
+    els.trainingStatsPanel.innerHTML = `<p class="hint">训练统计加载失败，请确认后端已启动。</p>`;
+  }
+}
+
+async function loadAdminActions() {
+  if (!els.adminActionsPanel || state.currentUser?.role !== "admin") return;
+  els.adminActionsPanel.innerHTML = `<p class="hint">正在加载知识库动作…</p>`;
+  try {
+    const [actionsRes, metaRes, deployRes] = await Promise.all([
+      fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions`, { headers: authHeaders() }),
+      fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions/meta`, { headers: authHeaders() }),
+      fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/deployment/info`),
+    ]);
+    if (!actionsRes.ok) throw new Error("admin actions unavailable");
+    const actions = await actionsRes.json();
+    const meta = metaRes.ok ? await metaRes.json() : null;
+    const deploy = deployRes.ok ? await deployRes.json() : null;
+    els.adminActionsPanel.innerHTML = `
+      <div class="admin-meta">
+        <p>知识库动作：${meta?.total ?? actions.length} 个</p>
+        ${deploy ? `<p class="hint">环境：${deploy.environment} · 数据库：${deploy.database}</p>` : ""}
+      </div>
+      <ul class="admin-action-list">
+        ${actions
+          .slice(0, 20)
+          .map((action) => `<li><strong>${action.name}</strong> <code>${action.id || "无ID"}</code></li>`)
+          .join("")}
+      </ul>
+      ${actions.length > 20 ? `<p class="hint">仅展示前 20 条，完整列表请使用 /docs 管理接口。</p>` : ""}
+    `;
+  } catch {
+    els.adminActionsPanel.innerHTML = `<p class="hint">管理员面板加载失败，请确认账号具备 admin 权限。</p>`;
+  }
+}
+
+function updatePrescriptionExportBar() {
+  if (!els.prescriptionExportBar) return;
+  const canExport = Boolean(state.prescription?.id) && !window.APP_CONFIG.DEMO_MODE && isSessionReady();
+  els.prescriptionExportBar.hidden = !canExport;
+}
+
 function updateUserIdentity() {
   const onLoginPage = state.currentStep === "login";
 
@@ -598,6 +827,14 @@ function renderHistoryCard(prescription) {
           )
           .join("")}
       </ul>
+      ${
+        prescription.id && !window.APP_CONFIG.DEMO_MODE
+          ? `<div class="history-card-actions">
+              <button class="btn btn-secondary btn-small history-export-md" type="button" data-id="${prescription.id}">导出 MD</button>
+              <button class="btn btn-secondary btn-small history-export-json" type="button" data-id="${prescription.id}">导出 JSON</button>
+            </div>`
+          : ""
+      }
     </article>
   `;
 }
@@ -625,6 +862,28 @@ async function loadPrescriptionHistory() {
       return;
     }
     els.prescriptionHistory.innerHTML = data.map(renderHistoryCard).join("");
+    els.prescriptionHistory.querySelectorAll(".history-export-md").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const id = Number(button.dataset.id);
+        const original = state.prescription;
+        if (original?.id === id) {
+          await exportPrescription("md");
+          return;
+        }
+        const backup = state.prescription;
+        state.prescription = { id };
+        await exportPrescription("md");
+        state.prescription = backup;
+      });
+    });
+    els.prescriptionHistory.querySelectorAll(".history-export-json").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const backup = state.prescription;
+        state.prescription = { id: Number(button.dataset.id) };
+        await exportPrescription("json");
+        state.prescription = backup;
+      });
+    });
   } catch (error) {
     const hint =
       error?.name === "AbortError"
@@ -655,6 +914,7 @@ async function requestPrescription(formData) {
         history: formData.history,
         pain_regions: formData.pain_regions,
         mobility_score: formData.mobility_score,
+        patient_profile_id: formData.patient_profile_id,
       }),
     },
     window.APP_CONFIG.PRESCRIPTION_TIMEOUT_MS
@@ -675,6 +935,7 @@ async function requestPrescription(formData) {
   const data = await response.json();
   return {
     id: data.id,
+    patient_profile_id: data.patient_profile_id,
     patient_name: data.patient_name,
     patient_age: data.patient_age,
     summary: data.summary,
@@ -748,6 +1009,16 @@ function renderPrescription(prescription) {
             : ""
         }
         ${
+          action.progression
+            ? `<p class="hint"><strong>进阶：</strong>${action.progression}</p>`
+            : ""
+        }
+        ${
+          action.regression
+            ? `<p class="hint"><strong>降阶：</strong>${action.regression}</p>`
+            : ""
+        }
+        ${
           poseSupported
             ? `<button class="btn btn-primary start-training" type="button" data-action-id="${action.id || ""}">
           开始跟练
@@ -761,6 +1032,8 @@ function renderPrescription(prescription) {
     `;
     els.actionList.appendChild(card);
   });
+
+  updatePrescriptionExportBar();
 
   els.actionList.querySelectorAll(".start-training").forEach((button) => {
     button.addEventListener("click", () => {
@@ -783,6 +1056,9 @@ function renderPrescription(prescription) {
 
 function updatePoseFeedback(result) {
   const { feedback, score, status } = result;
+  if (typeof score === "number") {
+    state.trainingLastScore = score;
+  }
   const latest = feedback?.[0] || "暂无反馈";
 
   els.feedbackOverlay.textContent = latest;
@@ -971,6 +1247,7 @@ function startTraining(action) {
   resetStartCameraButton();
 
   state.currentAction = action;
+  state.trainingLastScore = null;
   els.trainingActionName.textContent = `${action.name} · ${action.sets} 组 × ${action.reps} 次${action.frequency ? ` · ${action.frequency}` : ""}`;
   updateTrainingPoseHint(action.id);
   updateTrainingActionRef(action);
@@ -1039,10 +1316,32 @@ function stopCamera() {
 }
 
 function completeTraining() {
+  const action = state.currentAction;
   stopCamera();
-  state.currentAction = null;
-  goToStep("prescription");
-  showToast("训练已完成，可继续跟练其他动作或返回问诊");
+  const painBefore = els.checkinPainBefore?.value ? Number(els.checkinPainBefore.value) : null;
+  const painAfter = els.checkinPainAfter?.value ? Number(els.checkinPainAfter.value) : null;
+  const note = els.checkinNote?.value?.trim() || null;
+
+  const finish = () => {
+    state.currentAction = null;
+    goToStep("prescription");
+    showToast("训练已完成，可继续跟练其他动作或返回问诊");
+  };
+
+  if (!action || window.APP_CONFIG.DEMO_MODE || !isSessionReady()) {
+    finish();
+    return;
+  }
+
+  submitTrainingCheckin(action, { painBefore, painAfter, note })
+    .then(() => {
+      showToast("训练打卡已保存");
+      finish();
+    })
+    .catch((error) => {
+      showToast(typeof error.message === "string" ? error.message : "训练打卡保存失败");
+      finish();
+    });
 }
 
 function setHeaderMenuOpen(open) {
@@ -1209,7 +1508,32 @@ function bindEvents() {
   });
   document.getElementById("refresh-history").addEventListener("click", () => {
     loadPrescriptionHistory();
+    loadTrainingStats();
   });
+
+  document.getElementById("export-prescription-md")?.addEventListener("click", () => exportPrescription("md"));
+  document.getElementById("export-prescription-json")?.addEventListener("click", () => exportPrescription("json"));
+
+  els.patientProfileSelect?.addEventListener("change", (event) => {
+    const value = event.target.value;
+    state.selectedPatientProfileId = value ? Number(value) : null;
+  });
+
+  document.getElementById("save-patient-profile")?.addEventListener("click", async () => {
+    if (!requireLogin()) return;
+    const formData = readFormData();
+    if (!validateForm(formData)) return;
+    try {
+      const profile = await createPatientProfileFromIntake(formData);
+      if (profile) showToast(`已保存患者档案：${profile.name}`);
+      else showToast("患者档案保存失败");
+    } catch {
+      showToast("患者档案保存失败，请确认后端已启动");
+    }
+  });
+
+  els.adminEntryButton?.addEventListener("click", () => goToStep("admin"));
+  document.getElementById("back-from-admin")?.addEventListener("click", () => goToStep("intake"));
 
   document.getElementById("start-camera").addEventListener("click", startCamera);
   els.testDoubaoButton?.addEventListener("click", testDoubaoConnection);
@@ -1260,6 +1584,7 @@ function restoreSessionState() {
     state.prescription = savedPrescription;
     renderPrescription(savedPrescription);
     renderPrescriptionRecap(savedFormData);
+    updatePrescriptionExportBar();
 
     const validSteps = ["prescription", "history", "intake"];
     const targetStep = validSteps.includes(savedStep) ? savedStep : "prescription";
@@ -1276,13 +1601,15 @@ function init() {
   }
 
   initPainRegions();
-  bindEvents();
-  applyDevModeUi();
-  updateModeBadge();
-  updateAuthStatus();
-  switchAuthTab("login");
+bindEvents();
+applyDevModeUi();
+updateModeBadge();
+updateAuthStatus();
+updateAdminEntry();
+switchAuthTab("login");
 
   if (isSessionReady()) {
+    loadPatientProfiles();
     if (!restoreSessionState()) {
       goToStep("intake");
     }

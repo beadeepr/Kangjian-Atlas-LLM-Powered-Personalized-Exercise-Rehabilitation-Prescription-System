@@ -1286,6 +1286,89 @@ textarea {
   }
 }
 
+.history-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.prescription-export-bar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+.stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 12px;
+  margin: 12px 0;
+}
+
+.stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border-radius: 12px;
+  background: rgba(26, 115, 232, 0.06);
+}
+
+.stat-value {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: #102a56;
+}
+
+.stat-label {
+  font-size: 0.85rem;
+  color: #5f7ea8;
+}
+
+.trend-list {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.checkin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.checkin-grid label,
+.checkin-note-label {
+  display: grid;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: #102a56;
+}
+
+.checkin-grid input,
+.checkin-note-label input {
+  width: 100%;
+}
+
+.admin-panel .admin-action-list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.admin-panel code {
+  font-size: 0.82rem;
+  color: #5f7ea8;
+}
+
+.training-stats-panel h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: #102a56;
+}
+
 .history-section {
   margin-top: 20px;
   padding: 18px 20px;
