@@ -153,7 +153,6 @@ class TrainingCheckinBase(BaseModel):
     action_id: Optional[str] = None
     action_name: str
     trained_on: date
-    duration_minutes: Optional[int] = None
     completed_sets: Optional[int] = None
     completed_reps: Optional[int] = None
     pain_before: Optional[int] = None
@@ -173,7 +172,6 @@ class TrainingCheckinUpdateRequest(BaseModel):
     action_id: Optional[str] = None
     action_name: Optional[str] = None
     trained_on: Optional[date] = None
-    duration_minutes: Optional[int] = None
     completed_sets: Optional[int] = None
     completed_reps: Optional[int] = None
     pain_before: Optional[int] = None
@@ -191,7 +189,6 @@ class TrainingCheckinResponse(TrainingCheckinBase):
 class TrainingTrendPoint(BaseModel):
     date: date
     checkin_count: int
-    total_duration_minutes: int
     avg_pain_before: Optional[float] = None
     avg_pain_after: Optional[float] = None
     avg_score: Optional[float] = None
@@ -205,7 +202,6 @@ class TrainingTrendResponse(BaseModel):
 
 class TrainingVisualizationResponse(BaseModel):
     total_checkins: int
-    total_duration_minutes: int
     active_days: int
     avg_score: Optional[float] = None
     avg_pain_change: Optional[float] = None
@@ -215,7 +211,6 @@ class TrainingVisualizationResponse(BaseModel):
 class TrainingReportActionSummary(BaseModel):
     action_name: str
     count: int
-    total_duration_minutes: int
     avg_score: Optional[float] = None
 
 
@@ -228,8 +223,6 @@ class TrainingReportResponse(BaseModel):
     expected_days: int
     active_days: int
     completion_rate: float
-    total_duration_minutes: int
-    avg_duration_per_active_day: Optional[float] = None
     avg_score: Optional[float] = None
     avg_pain_before: Optional[float] = None
     avg_pain_after: Optional[float] = None

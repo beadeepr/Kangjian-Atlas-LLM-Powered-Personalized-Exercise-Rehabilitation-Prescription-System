@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>康健图谱 - 个性化运动康复处方</title>
-    <link rel="stylesheet" href="style.css?v=20260619" />
+    <link rel="stylesheet" href="style.css?v=20260623e" />
   </head>
   <body>
     <header class="app-header">
@@ -42,7 +42,8 @@
         <button class="step-item" data-step="intake" type="button" disabled>2 问诊</button>
         <button class="step-item" data-step="prescription" type="button" disabled>3 处方</button>
         <button class="step-item" data-step="history" type="button" disabled>4 历史</button>
-        <button class="step-item" data-step="training" type="button" disabled>5 跟练</button>
+        <button class="step-item" data-step="demo" type="button" disabled>5 演示</button>
+        <button class="step-item" data-step="training" type="button" disabled>6 跟练</button>
       </nav>
     </header>
 
@@ -238,6 +239,57 @@
         </div>
       </section>
 
+      <section id="page-demo" class="page" aria-labelledby="demo-title">
+        <div class="page-head">
+          <h2 id="demo-title">动作演示</h2>
+          <p id="demo-action-name" class="summary-text"></p>
+        </div>
+
+        <div class="demo-layout card">
+          <div class="demo-image-wrap">
+            <img id="demo-action-image" alt="" loading="lazy" onerror="handleActionImageError(this)" />
+            <span class="action-image-placeholder">示意图待上传</span>
+          </div>
+
+          <div class="demo-content">
+            <div class="demo-meta" id="demo-meta"></div>
+
+            <div class="demo-section">
+              <h3 class="demo-section-title">动作说明</h3>
+              <p id="demo-action-desc" class="demo-desc"></p>
+            </div>
+
+            <div class="demo-section" id="demo-contraindications-section" hidden>
+              <h3 class="demo-section-title">⚠️ 禁忌事项</h3>
+              <p id="demo-contraindications" class="hint demo-desc"></p>
+            </div>
+
+            <div class="demo-section" id="demo-progression-section" hidden>
+              <h3 class="demo-section-title">进阶条件</h3>
+              <p id="demo-progression" class="hint demo-desc"></p>
+            </div>
+
+            <div class="demo-guidance">
+              <p class="demo-guidance-text">请仔细查看示意图和动作说明，确认自己没有禁忌事项后再进入跟练。建议在宽敞、光线充足的空间进行，穿着宽松舒适的衣物。</p>
+            </div>
+
+            <div class="demo-video-wrap" id="demo-video-wrap" hidden>
+              <h3 class="demo-section-title">示范视频</h3>
+              <a id="demo-video-link" class="action-video-link demo-video-link" href="#" target="_blank" rel="noopener noreferrer">
+                <span class="demo-video-icon">▶</span>
+                <span id="demo-video-label">观看示范视频</span>
+              </a>
+              <p class="hint" id="demo-video-hint"></p>
+            </div>
+
+            <div class="demo-actions">
+              <button class="btn btn-primary btn-block" id="demo-start-training" type="button" hidden>启动摄像头，开始跟练</button>
+              <button class="btn btn-secondary btn-block" id="demo-back" type="button">返回处方</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
       <section id="page-training" class="page" aria-labelledby="training-title">
         <div class="page-head training-head">
           <h2 id="training-title">实时动作纠正</h2>
@@ -250,34 +302,16 @@
             <canvas id="overlay" width="640" height="480"></canvas>
             <div class="video-placeholder" id="video-placeholder">
               <p>准备开始跟练</p>
-              <p class="hint">请先阅读右侧拍摄建议，准备好后点击「启动摄像头」</p>
+              <p class="hint">请先查看动作参考，准备好后点击「启动摄像头」</p>
             </div>
             <div class="camera-loading" id="camera-loading" hidden>
               <span class="camera-loading-spinner" aria-hidden="true"></span>
               <p id="camera-loading-text">正在准备…</p>
             </div>
-            <div class="feedback-overlay" id="feedback-overlay">等待检测…</div>
             <div class="score-badge" id="score-badge">-- 分</div>
           </div>
 
           <aside class="training-side">
-            <div class="training-tips">
-              <h3 class="training-tips-title">动作参考</h3>
-              <div class="training-action-ref" id="training-action-ref" hidden>
-                <div class="training-action-ref-image">
-                  <img id="training-action-image" alt="" loading="lazy" onerror="handleActionImageError(this)" />
-                  <span class="action-image-placeholder">示意图待上传</span>
-                </div>
-                <p id="training-action-desc" class="hint"></p>
-                <a id="training-action-video" class="action-video-link" href="#" target="_blank" rel="noopener noreferrer" hidden>观看示范视频</a>
-              </div>
-              <h3 class="training-tips-title">拍摄建议</h3>
-              <ul class="training-tips-list">
-                <li>距摄像头 1.5–2 米，确保头、躯干与四肢完整入镜</li>
-                <li id="training-pose-hint">侧对镜头，便于捕捉动作幅度</li>
-                <li>避免逆光或强遮挡，保证关节部位清晰可见</li>
-              </ul>
-            </div>
             <div class="training-side-card">
               <h3 class="training-side-title">实时反馈</h3>
               <div class="status-panel" id="status-panel">
@@ -313,8 +347,13 @@
       <section id="page-admin" class="page" aria-labelledby="admin-title">
         <div class="page-head">
           <h2 id="admin-title">管理后台</h2>
-          <p>管理员可查看知识库动作概览与部署状态（完整维护请使用 API 文档）。</p>
+          <p>维护康复动作知识库：可筛选、新增、编辑与删除动作；高级配置可打开 API 文档。</p>
         </div>
+        <nav class="admin-quick-nav" id="admin-quick-nav" aria-label="管理快捷入口" hidden>
+          <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-test-report-section">测试报告</button>
+          <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-create-section">新增动作</button>
+          <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-list-section">管理动作</button>
+        </nav>
         <div class="card admin-panel" id="admin-actions-panel">
           <p class="hint">正在加载…</p>
         </div>
@@ -336,8 +375,8 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="config.js?v=20260619"></script>
-    <script src="mock.js?v=20260619"></script>
-    <script type="module" src="app.js?v=20260619"></script>
+    <script src="config.js?v=20260623"></script>
+    <script src="mock.js?v=20260623"></script>
+    <script type="module" src="app.js?v=20260623f"></script>
   </body>
 </html>

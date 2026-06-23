@@ -49,10 +49,9 @@ def _action_summaries(checkins: list[models.TrainingCheckinModel]) -> list[dict[
         summaries.append({
             "action_name": action_name,
             "count": len(items),
-            "total_duration_minutes": sum(item.duration_minutes or 0 for item in items),
             "avg_score": _average([item.score for item in items]),
         })
-    return sorted(summaries, key=lambda item: (item["count"], item["total_duration_minutes"]), reverse=True)
+    return sorted(summaries, key=lambda item: item["count"], reverse=True)
 
 
 def _vas_summary(avg_before: float | None, avg_after: float | None, avg_change: float | None) -> str:
@@ -134,7 +133,6 @@ def build_training_report(
     avg_before = _average([checkin.pain_before for checkin in checkins])
     avg_after = _average([checkin.pain_after for checkin in checkins])
     avg_change = _average(pain_changes)
-    total_duration = sum(checkin.duration_minutes or 0 for checkin in checkins)
     points = build_training_trends(
         db,
         user_id=user_id,
@@ -159,8 +157,6 @@ def build_training_report(
         "expected_days": expected_days,
         "active_days": active_days,
         "completion_rate": completion_rate,
-        "total_duration_minutes": total_duration,
-        "avg_duration_per_active_day": round(total_duration / active_days, 1) if active_days else None,
         "avg_score": avg_score,
         "avg_pain_before": avg_before,
         "avg_pain_after": avg_after,
@@ -180,7 +176,7 @@ def build_training_report(
 
 def render_training_report_markdown(report: dict[str, Any]) -> str:
     action_lines = [
-        f"- {item['action_name']}：{item['count']} 次，累计 {item['total_duration_minutes']} 分钟，平均评分 {item.get('avg_score') or '暂无'}"
+        f"- {item['action_name']}：{item['count']} 次，平均评分 {item.get('avg_score') or '暂无'}"
         for item in report.get("action_summaries", [])
     ] or ["- 暂无动作打卡"]
     return "\n".join([
@@ -189,7 +185,6 @@ def render_training_report_markdown(report: dict[str, Any]) -> str:
         f"- 周期：{report['start_date']} 至 {report['end_date']}",
         f"- 训练天数：{report['active_days']} / {report['expected_days']}",
         f"- 完成率：{int(report['completion_rate'] * 100)}%",
-        f"- 累计训练时长：{report['total_duration_minutes']} 分钟",
         f"- 平均动作评分：{report.get('avg_score') or '暂无'}",
         f"- VAS 总结：{report['vas_summary']}",
         "",

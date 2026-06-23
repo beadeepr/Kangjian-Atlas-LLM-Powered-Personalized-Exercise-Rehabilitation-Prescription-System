@@ -139,7 +139,6 @@ class TrainingCheckinModel(Base):
     action_id = Column(String(128), nullable=True)
     action_name = Column(String(128), nullable=False)
     trained_on = Column(Date, nullable=False, index=True)
-    duration_minutes = Column(Integer, nullable=True)
     completed_sets = Column(Integer, nullable=True)
     completed_reps = Column(Integer, nullable=True)
     pain_before = Column(Integer, nullable=True)

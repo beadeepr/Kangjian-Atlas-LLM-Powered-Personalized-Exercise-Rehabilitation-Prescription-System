@@ -17,6 +17,10 @@ const state = {
   selectedPatientProfileId: null,
   patientProfiles: [],
   trainingLastScore: null,
+  adminEditingId: null,
+  adminFilters: { q: "", bodyRegion: "" },
+  adminPanelData: null,
+  adminScrollFocusTimer: null,
 };
 
 const els = {
@@ -51,11 +55,6 @@ const els = {
   loadingProgressBar: document.getElementById("loading-progress-bar"),
   loadingPercent: document.getElementById("loading-percent"),
   trainingActionName: document.getElementById("training-action-name"),
-  trainingActionRef: document.getElementById("training-action-ref"),
-  trainingActionImage: document.getElementById("training-action-image"),
-  trainingActionDesc: document.getElementById("training-action-desc"),
-  trainingActionVideo: document.getElementById("training-action-video"),
-  trainingPoseHint: document.getElementById("training-pose-hint"),
   videoShell: document.getElementById("video-shell"),
   video: document.getElementById("video"),
   overlay: document.getElementById("overlay"),
@@ -89,6 +88,7 @@ const els = {
   checkinNote: document.getElementById("checkin-note"),
   adminEntryButton: document.getElementById("go-admin"),
   adminActionsPanel: document.getElementById("admin-actions-panel"),
+  adminQuickNav: document.getElementById("admin-quick-nav"),
 };
 
 function readStoredAuth() {
@@ -392,8 +392,10 @@ function goToStep(step) {
       button.disabled = true;
     } else if (targetStep === "prescription") {
       button.disabled = !state.prescription;
-    } else if (targetStep === "training") {
+    } else if (targetStep === "demo") {
       button.disabled = !state.currentAction;
+    } else if (targetStep === "training") {
+      button.disabled = !state.currentAction || !window.APP_CONFIG.isPoseSupported(state.currentAction?.id);
     } else {
       button.disabled = false;
     }
@@ -593,6 +595,9 @@ function updateAdminEntry() {
   if (els.adminEntryButton) {
     els.adminEntryButton.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
   }
+  if (els.adminQuickNav) {
+    els.adminQuickNav.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
+  }
 }
 
 function todayIsoDate() {
@@ -727,7 +732,6 @@ async function loadTrainingStats() {
       <div class="stats-grid">
         <div class="stat-card"><span class="stat-value">${data.total_checkins}</span><span class="stat-label">打卡次数</span></div>
         <div class="stat-card"><span class="stat-value">${data.active_days}</span><span class="stat-label">活跃天数</span></div>
-        <div class="stat-card"><span class="stat-value">${data.total_duration_minutes}</span><span class="stat-label">累计分钟</span></div>
         <div class="stat-card"><span class="stat-value">${data.avg_score ?? "—"}</span><span class="stat-label">平均得分</span></div>
       </div>
       ${
@@ -735,7 +739,7 @@ async function loadTrainingStats() {
           ? `<ul class="trend-list">${recent
               .map(
                 (point) =>
-                  `<li><strong>${point.date}</strong>：打卡 ${point.checkin_count} 次，时长 ${point.total_duration_minutes} 分钟${
+                  `<li><strong>${point.date}</strong>：打卡 ${point.checkin_count} 次${
                     point.avg_score != null ? `，均分 ${point.avg_score}` : ""
                   }</li>`
               )
@@ -748,35 +752,515 @@ async function loadTrainingStats() {
   }
 }
 
-async function loadAdminActions() {
-  if (!els.adminActionsPanel || state.currentUser?.role !== "admin") return;
-  els.adminActionsPanel.innerHTML = `<p class="hint">正在加载知识库动作…</p>`;
+function getApiDocsUrl() {
+  const apiBase = window.APP_CONFIG.API_BASE || "";
+  if (apiBase.endsWith("/api")) {
+    return `${apiBase.slice(0, -4)}/docs`;
+  }
+  return `${window.location.protocol}//${window.location.hostname}:8000/docs`;
+}
+
+function escapeAdminText(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+function parseAdminList(value) {
+  return String(value || "")
+    .split(/[,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function joinAdminList(items) {
+  return Array.isArray(items) ? items.join("，") : "";
+}
+
+function buildAdminActionsUrl(filters = state.adminFilters) {
+  const params = new URLSearchParams();
+  if (filters.q?.trim()) params.set("q", filters.q.trim());
+  if (filters.bodyRegion) params.set("body_region", filters.bodyRegion);
+  const query = params.toString();
+  return `${window.APP_CONFIG.API_BASE}/admin/actions${query ? `?${query}` : ""}`;
+}
+
+function renderAdminActionFormFields(action = {}, prefix = "admin") {
+  const id = action.id || "";
+  const idField =
+    prefix === "create"
+      ? `<label class="admin-field admin-field-wide">动作 ID <span class="required">*</span>
+          <input name="id" type="text" placeholder="例如：neck_chin_tuck" value="${escapeAdminText(id)}" required />
+          <span class="hint">2-64 位字母、数字、下划线或连字符</span>
+        </label>`
+      : `<input name="id" type="hidden" value="${escapeAdminText(id)}" />`;
+
+  return `
+    ${idField}
+    <label class="admin-field admin-field-wide">动作名称 <span class="required">*</span>
+      <input name="name" type="text" value="${escapeAdminText(action.name || "")}" required />
+    </label>
+    <label class="admin-field">组数
+      <input name="sets" type="number" min="1" max="20" value="${action.sets ?? 3}" />
+    </label>
+    <label class="admin-field">次数
+      <input name="reps" type="number" min="1" max="200" value="${action.reps ?? 10}" />
+    </label>
+    <label class="admin-field admin-field-wide">频次
+      <input name="frequency" type="text" value="${escapeAdminText(action.frequency || "")}" placeholder="例如：每日1-2次" />
+    </label>
+    <label class="admin-field admin-field-wide">训练部位
+      <input name="body_regions" type="text" value="${escapeAdminText(joinAdminList(action.body_regions))}" placeholder="颈部，肩部" />
+    </label>
+    <label class="admin-field admin-field-wide">适应症状
+      <input name="target_conditions" type="text" value="${escapeAdminText(joinAdminList(action.target_conditions))}" placeholder="颈椎病，肩颈疼痛" />
+    </label>
+    <label class="admin-field admin-field-full">动作说明
+      <textarea name="description" rows="2">${escapeAdminText(action.description || action.note || "")}</textarea>
+    </label>
+    <label class="admin-field admin-field-full">禁忌说明
+      <textarea name="contraindications" rows="2">${escapeAdminText(action.contraindications || "")}</textarea>
+    </label>
+  `;
+}
+
+function readAdminActionForm(form) {
+  const formData = new FormData(form);
+  const payload = {
+    name: formData.get("name")?.toString().trim() || "",
+    sets: Number(formData.get("sets") || 1),
+    reps: Number(formData.get("reps") || 1),
+    frequency: formData.get("frequency")?.toString().trim() || null,
+    description: formData.get("description")?.toString().trim() || null,
+    contraindications: formData.get("contraindications")?.toString().trim() || null,
+    body_regions: parseAdminList(formData.get("body_regions")),
+    target_conditions: parseAdminList(formData.get("target_conditions")),
+  };
+  const id = formData.get("id")?.toString().trim();
+  if (id) payload.id = id;
+  return payload;
+}
+
+function renderAdminTestReport(report) {
+  if (!report) {
+    return `<div class="admin-test-report" id="admin-test-report-section">
+      <h3>测试报告</h3>
+      <p class="hint">暂无报告。可在 backend 目录运行 <code>python run_backend_tests.py</code> 生成。</p>
+    </div>`;
+  }
+  const statusClass = report.status === "passed" ? "admin-status-passed" : "admin-status-failed";
+  return `<div class="admin-test-report" id="admin-test-report-section">
+    <h3>测试报告</h3>
+    <p class="admin-test-summary ${statusClass}">
+      ${report.passed}/${report.total} 通过 · 状态 ${escapeAdminText(report.status)}
+      ${report.generated_at ? ` · ${escapeAdminText(report.generated_at.slice(0, 19).replace("T", " "))}` : ""}
+    </p>
+    <ul class="admin-test-cases">
+      ${(report.cases || [])
+        .map(
+          (item) =>
+            `<li class="${item.status === "passed" ? "passed" : "failed"}">${escapeAdminText(item.name)} · ${escapeAdminText(item.detail || item.status)}</li>`
+        )
+        .join("")}
+    </ul>
+    ${report.note ? `<p class="hint">${escapeAdminText(report.note)}</p>` : ""}
+  </div>`;
+}
+
+function getAdminScrollOffset() {
+  const header = document.querySelector(".app-header");
+  const quickNav = document.getElementById("admin-quick-nav");
+  let offset = (header?.getBoundingClientRect().height || 0) + 16;
+  if (quickNav && !quickNav.hidden) {
+    offset += quickNav.getBoundingClientRect().height + 12;
+  }
+  return offset;
+}
+
+function clearAdminScrollFocusTimer() {
+  if (state.adminScrollFocusTimer) {
+    clearTimeout(state.adminScrollFocusTimer);
+    state.adminScrollFocusTimer = null;
+  }
+}
+
+async function scrollAdminSection(sectionId, options = {}) {
+  clearAdminScrollFocusTimer();
+
+  let section = document.querySelector(`#page-admin #${sectionId}`);
+  if (!section && options.waitForLoad) {
+    await loadAdminActions({ silent: true });
+    section = document.querySelector(`#page-admin #${sectionId}`);
+  }
+  if (!section) return;
+
+  if (options.blurActive !== false && document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+
+  const top = section.getBoundingClientRect().top + window.scrollY - getAdminScrollOffset();
+  window.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+
+  if (options.focusSelector) {
+    state.adminScrollFocusTimer = window.setTimeout(() => {
+      section.querySelector(options.focusSelector)?.focus({ preventScroll: true });
+      state.adminScrollFocusTimer = null;
+    }, 350);
+  }
+}
+
+function bindAdminQuickNavEvents() {
+  if (!els.adminQuickNav || els.adminQuickNav.dataset.bound === "true") return;
+  els.adminQuickNav.dataset.bound = "true";
+
+  els.adminQuickNav.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-admin-target]");
+    if (!button) return;
+
+    const target = button.dataset.adminTarget;
+    if (target === "admin-create-section") {
+      scrollAdminSection(target, {
+        waitForLoad: true,
+        focusSelector: 'input[name="id"]',
+      });
+      return;
+    }
+
+    scrollAdminSection(target, { waitForLoad: true, blurActive: true });
+  });
+}
+
+function renderAdminActionCard(action) {
+  const editing = state.adminEditingId === action.id;
+  const regions = (action.body_regions || []).join("、") || "未标注";
+  const conditions = (action.target_conditions || []).slice(0, 3).join("、") || "未标注";
+  return `
+    <article class="admin-action-card" data-action-id="${escapeAdminText(action.id)}">
+      <div class="admin-action-head">
+        <div>
+          <h4>${escapeAdminText(action.name)}</h4>
+          <p class="admin-action-meta"><code>${escapeAdminText(action.id || "无ID")}</code> · ${action.sets ?? "-"} 组 × ${action.reps ?? "-"} 次${action.frequency ? ` · ${escapeAdminText(action.frequency)}` : ""}</p>
+          <p class="hint">部位：${escapeAdminText(regions)} · 适应：${escapeAdminText(conditions)}</p>
+        </div>
+        <div class="admin-action-buttons">
+          <button class="btn btn-secondary btn-small admin-edit-action" type="button" data-action-id="${escapeAdminText(action.id)}">${editing ? "收起" : "编辑"}</button>
+          <button class="btn btn-secondary btn-small admin-delete-action" type="button" data-action-id="${escapeAdminText(action.id)}">删除</button>
+        </div>
+      </div>
+      ${
+        editing
+          ? `<form class="admin-form admin-edit-form" data-action-id="${escapeAdminText(action.id)}">
+              ${renderAdminActionFormFields(action, "edit")}
+              <div class="admin-form-actions">
+                <button class="btn btn-primary btn-small" type="submit">保存修改</button>
+                <button class="btn btn-secondary btn-small admin-cancel-edit" type="button">取消</button>
+              </div>
+            </form>`
+          : ""
+      }
+    </article>
+  `;
+}
+
+function renderAdminActionListInner(actions) {
+  if (!actions.length) {
+    return `<p class="hint">没有匹配的动作，请调整筛选条件或新增动作。</p>`;
+  }
+  return `<div class="admin-action-cards">${actions.map((action) => renderAdminActionCard(action)).join("")}</div>`;
+}
+
+function renderAdminPanel({ actions, meta, deploy, testReport }) {
+  const regionOptions = (meta?.body_regions || [])
+    .map(
+      (region) =>
+        `<option value="${escapeAdminText(region)}"${state.adminFilters.bodyRegion === region ? " selected" : ""}>${escapeAdminText(region)}</option>`
+    )
+    .join("");
+
+  return `
+    <div class="admin-toolbar">
+      <label class="admin-filter">关键词
+        <input id="admin-filter-q" type="search" placeholder="名称、ID、说明…" value="${escapeAdminText(state.adminFilters.q)}" />
+      </label>
+      <label class="admin-filter">部位
+        <select id="admin-filter-region">
+          <option value="">全部部位</option>
+          ${regionOptions}
+        </select>
+      </label>
+      <button class="btn btn-secondary btn-small" id="admin-refresh" type="button">刷新</button>
+      <button class="btn btn-secondary btn-small" id="admin-open-docs" type="button">打开 API 文档</button>
+    </div>
+
+    <div class="admin-meta-grid">
+      <div class="admin-meta-card">
+        <span class="admin-meta-value">${meta?.total ?? actions.length}</span>
+        <span class="admin-meta-label">知识库动作</span>
+      </div>
+      <div class="admin-meta-card">
+        <span class="admin-meta-value" id="admin-filtered-count">${actions.length}</span>
+        <span class="admin-meta-label">当前筛选结果</span>
+      </div>
+      ${
+        deploy
+          ? `<div class="admin-meta-card admin-meta-wide">
+              <span class="admin-meta-label">部署环境</span>
+              <span class="hint">${escapeAdminText(deploy.environment)} · 数据库 ${escapeAdminText(deploy.database)}</span>
+            </div>`
+          : ""
+      }
+    </div>
+
+    ${renderAdminTestReport(testReport)}
+
+    <section class="admin-section" id="admin-create-section">
+      <h3>新增动作</h3>
+      <form class="admin-form" id="admin-create-form">
+        ${renderAdminActionFormFields({}, "create")}
+        <div class="admin-form-actions">
+          <button class="btn btn-primary" type="submit">添加动作</button>
+        </div>
+      </form>
+    </section>
+
+    <section class="admin-section" id="admin-list-section">
+      <div class="admin-section-head">
+        <h3>动作列表</h3>
+        <span class="hint" id="admin-action-count">共 ${actions.length} 条</span>
+      </div>
+      <div id="admin-action-list-root">
+        ${renderAdminActionListInner(actions)}
+      </div>
+    </section>
+  `;
+}
+
+function renderAdminPanelToDom(data) {
+  if (!els.adminActionsPanel) return;
+  els.adminActionsPanel.innerHTML = renderAdminPanel(data);
+  state.adminPanelData = data;
+}
+
+function refreshAdminActionList(options = {}) {
+  const data = state.adminPanelData;
+  if (!data || !els.adminActionsPanel) return;
+
+  const listRoot = els.adminActionsPanel.querySelector("#admin-action-list-root");
+  if (!listRoot) {
+    renderAdminPanelToDom(data);
+    return;
+  }
+
+  listRoot.innerHTML = renderAdminActionListInner(data.actions);
+  const countEl = els.adminActionsPanel.querySelector("#admin-action-count");
+  if (countEl) countEl.textContent = `共 ${data.actions.length} 条`;
+  const filteredCountEl = els.adminActionsPanel.querySelector("#admin-filtered-count");
+  if (filteredCountEl) filteredCountEl.textContent = String(data.actions.length);
+
+  if (options.focusActionId) {
+    requestAnimationFrame(() => {
+      const card = listRoot.querySelector(
+        `.admin-action-card[data-action-id="${CSS.escape(options.focusActionId)}"]`
+      );
+      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    });
+  }
+}
+
+function toggleAdminActionEdit(actionId) {
+  state.adminEditingId = state.adminEditingId === actionId ? null : actionId;
+  refreshAdminActionList({
+    focusActionId: state.adminEditingId,
+  });
+}
+
+async function fetchAdminTestReport() {
   try {
-    const [actionsRes, metaRes, deployRes] = await Promise.all([
-      fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions`, { headers: authHeaders() }),
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/test_report`, {
+      headers: authHeaders(),
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
+}
+
+async function loadAdminActions(options = {}) {
+  if (!els.adminActionsPanel || state.currentUser?.role !== "admin") return;
+  const { silent = false } = options;
+  const scrollY = window.scrollY;
+
+  if (!silent) {
+    els.adminActionsPanel.innerHTML = `<p class="hint">正在加载管理后台…</p>`;
+  }
+
+  try {
+    const [actionsRes, metaRes, deployRes, testReport] = await Promise.all([
+      fetchWithTimeout(buildAdminActionsUrl(), { headers: authHeaders() }),
       fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions/meta`, { headers: authHeaders() }),
       fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/deployment/info`),
+      fetchAdminTestReport(),
     ]);
     if (!actionsRes.ok) throw new Error("admin actions unavailable");
     const actions = await actionsRes.json();
     const meta = metaRes.ok ? await metaRes.json() : null;
     const deploy = deployRes.ok ? await deployRes.json() : null;
-    els.adminActionsPanel.innerHTML = `
-      <div class="admin-meta">
-        <p>知识库动作：${meta?.total ?? actions.length} 个</p>
-        ${deploy ? `<p class="hint">环境：${deploy.environment} · 数据库：${deploy.database}</p>` : ""}
-      </div>
-      <ul class="admin-action-list">
-        ${actions
-          .slice(0, 20)
-          .map((action) => `<li><strong>${action.name}</strong> <code>${action.id || "无ID"}</code></li>`)
-          .join("")}
-      </ul>
-      ${actions.length > 20 ? `<p class="hint">仅展示前 20 条，完整列表请使用 /docs 管理接口。</p>` : ""}
-    `;
+    renderAdminPanelToDom({ actions, meta, deploy, testReport });
+    if (silent) {
+      window.scrollTo(0, scrollY);
+    }
   } catch {
-    els.adminActionsPanel.innerHTML = `<p class="hint">管理员面板加载失败，请确认账号具备 admin 权限。</p>`;
+    els.adminActionsPanel.innerHTML = `<p class="hint">管理员面板加载失败，请确认账号具备 admin 权限且后端已启动。</p>`;
+    state.adminPanelData = null;
   }
+}
+
+async function submitAdminCreate(form) {
+  const payload = readAdminActionForm(form);
+  if (!payload.id || !payload.name) {
+    showToast("请填写动作 ID 和名称");
+    return;
+  }
+  const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions`, {
+    method: "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await parseApiError(response);
+    throw new Error(typeof detail === "string" ? detail : "新增动作失败");
+  }
+  form.reset();
+  showToast("动作已添加");
+  state.adminEditingId = null;
+  await loadAdminActions({ silent: true });
+}
+
+async function submitAdminEdit(actionId, form) {
+  const payload = readAdminActionForm(form);
+  delete payload.id;
+  const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions/${encodeURIComponent(actionId)}`, {
+    method: "PUT",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const detail = await parseApiError(response);
+    throw new Error(typeof detail === "string" ? detail : "保存失败");
+  }
+  showToast("动作已更新");
+  state.adminEditingId = null;
+  await loadAdminActions({ silent: true });
+}
+
+async function deleteAdminAction(actionId) {
+  if (!actionId) return;
+  if (!window.confirm(`确定删除动作「${actionId}」吗？此操作不可撤销。`)) return;
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/admin/actions/${encodeURIComponent(actionId)}`,
+    {
+      method: "DELETE",
+      headers: authHeaders(),
+    }
+  );
+  if (!response.ok) {
+    const detail = await parseApiError(response);
+    throw new Error(typeof detail === "string" ? detail : "删除失败");
+  }
+  showToast("动作已删除");
+  if (state.adminEditingId === actionId) state.adminEditingId = null;
+  await loadAdminActions({ silent: true });
+}
+
+function bindAdminPanelEvents() {
+  if (!els.adminActionsPanel || els.adminActionsPanel.dataset.bound === "true") return;
+  els.adminActionsPanel.dataset.bound = "true";
+
+  els.adminActionsPanel.addEventListener("click", async (event) => {
+    if (state.currentUser?.role !== "admin") return;
+
+    const docsButton = event.target.closest("#admin-open-docs");
+    if (docsButton) {
+      window.open(getApiDocsUrl(), "_blank", "noopener");
+      return;
+    }
+
+    const refreshButton = event.target.closest("#admin-refresh");
+    if (refreshButton) {
+      await loadAdminActions();
+      showToast("已刷新");
+      return;
+    }
+
+    const editButton = event.target.closest(".admin-edit-action");
+    if (editButton) {
+      toggleAdminActionEdit(editButton.dataset.actionId);
+      return;
+    }
+
+    const cancelButton = event.target.closest(".admin-cancel-edit");
+    if (cancelButton) {
+      state.adminEditingId = null;
+      refreshAdminActionList();
+      return;
+    }
+
+    const deleteButton = event.target.closest(".admin-delete-action");
+    if (deleteButton) {
+      try {
+        await deleteAdminAction(deleteButton.dataset.actionId);
+      } catch (error) {
+        showToast(error.message || "删除失败");
+      }
+      return;
+    }
+  });
+
+  els.adminActionsPanel.addEventListener("change", async (event) => {
+    if (state.currentUser?.role !== "admin") return;
+    if (event.target.id === "admin-filter-region") {
+      state.adminFilters.bodyRegion = event.target.value;
+      await loadAdminActions({ silent: true });
+    }
+  });
+
+  els.adminActionsPanel.addEventListener("input", (event) => {
+    if (state.currentUser?.role !== "admin") return;
+    if (event.target.id !== "admin-filter-q") return;
+    state.adminFilters.q = event.target.value;
+    clearTimeout(window.adminFilterTimer);
+    window.adminFilterTimer = window.setTimeout(() => {
+      loadAdminActions({ silent: true });
+    }, 300);
+  });
+
+  els.adminActionsPanel.addEventListener("submit", async (event) => {
+    if (state.currentUser?.role !== "admin") return;
+    const createForm = event.target.closest("#admin-create-form");
+    if (createForm) {
+      event.preventDefault();
+      try {
+        await submitAdminCreate(createForm);
+      } catch (error) {
+        showToast(error.message || "新增动作失败");
+      }
+      return;
+    }
+
+    const editForm = event.target.closest(".admin-edit-form");
+    if (editForm) {
+      event.preventDefault();
+      try {
+        await submitAdminEdit(editForm.dataset.actionId, editForm);
+      } catch (error) {
+        showToast(error.message || "保存失败");
+      }
+    }
+  });
 }
 
 function updatePrescriptionExportBar() {
@@ -1018,16 +1502,10 @@ function renderPrescription(prescription) {
             ? `<p class="hint"><strong>降阶：</strong>${action.regression}</p>`
             : ""
         }
-        ${
-          poseSupported
-            ? `<button class="btn btn-primary start-training" type="button" data-action-id="${action.id || ""}">
-          开始跟练
-        </button>`
-            : `<button class="btn btn-secondary unsupported-training" type="button" data-action-id="${action.id || ""}">
-          仅查看处方
+        <button class="btn btn-primary view-demo" type="button" data-action-id="${action.id || ""}">
+          查看演示${poseSupported ? " / 跟练" : ""}
         </button>
-        <p class="hint support-hint">${window.APP_CONFIG.getUnsupportedPoseHint()}</p>`
-        }
+        ${poseSupported ? "" : `<p class="hint support-hint">${window.APP_CONFIG.getUnsupportedPoseHint()}</p>`}
       </div>
     `;
     els.actionList.appendChild(card);
@@ -1035,7 +1513,7 @@ function renderPrescription(prescription) {
 
   updatePrescriptionExportBar();
 
-  els.actionList.querySelectorAll(".start-training").forEach((button) => {
+  els.actionList.querySelectorAll(".view-demo").forEach((button) => {
     button.addEventListener("click", () => {
       const actionId = button.dataset.actionId;
       const action = prescription.actions.find((item) => item.id === actionId);
@@ -1043,13 +1521,7 @@ function renderPrescription(prescription) {
         showToast("动作信息缺失，请稍后重试");
         return;
       }
-      startTraining(action);
-    });
-  });
-
-  els.actionList.querySelectorAll(".unsupported-training").forEach((button) => {
-    button.addEventListener("click", () => {
-      showToast("该动作暂不支持实时纠正，可先参考处方说明完成训练。");
+      showDemo(action);
     });
   });
 }
@@ -1061,7 +1533,7 @@ function updatePoseFeedback(result) {
   }
   const latest = feedback?.[0] || "暂无反馈";
 
-  els.feedbackOverlay.textContent = latest;
+  if (els.feedbackOverlay) els.feedbackOverlay.textContent = latest;
   els.scoreBadge.textContent = `${score ?? "--"} 分`;
   els.statusText.textContent =
     status === "ok"
@@ -1123,32 +1595,6 @@ function averageVisibility(visibility) {
 
 function getPoseActionId(action) {
   return action?.backendId || window.APP_CONFIG.getBackendActionId(action?.id) || action?.id;
-}
-
-function updateTrainingPoseHint(actionId) {
-  if (!els.trainingPoseHint) return;
-  els.trainingPoseHint.textContent = window.APP_CONFIG.getPoseCameraHint(actionId);
-}
-
-function updateTrainingActionRef(action) {
-  if (!els.trainingActionRef) return;
-  els.trainingActionRef.hidden = false;
-  if (els.trainingActionImage) {
-    els.trainingActionImage.classList.remove("is-missing");
-    els.trainingActionImage.src = window.APP_CONFIG.assetUrl(action.image);
-    els.trainingActionImage.alt = `${action.name}参考示意图`;
-  }
-  if (els.trainingActionDesc) {
-    els.trainingActionDesc.textContent = action.description || "";
-  }
-  if (els.trainingActionVideo) {
-    if (action.videoUrl) {
-      els.trainingActionVideo.href = action.videoUrl;
-      els.trainingActionVideo.hidden = false;
-    } else {
-      els.trainingActionVideo.hidden = true;
-    }
-  }
 }
 
 function queuePosePayload(frame) {
@@ -1235,6 +1681,75 @@ function preloadPoseTracker() {
   });
 }
 
+function showDemo(action) {
+  state.currentAction = action;
+
+  const nameEl = document.getElementById("demo-action-name");
+  const imgEl = document.getElementById("demo-action-image");
+  const metaEl = document.getElementById("demo-meta");
+  const descEl = document.getElementById("demo-action-desc");
+  const contraSec = document.getElementById("demo-contraindications-section");
+  const contraEl = document.getElementById("demo-contraindications");
+  const progSec = document.getElementById("demo-progression-section");
+  const progEl = document.getElementById("demo-progression");
+  const videoWrap = document.getElementById("demo-video-wrap");
+  const videoLink = document.getElementById("demo-video-link");
+  const videoHintEl = document.getElementById("demo-video-hint");
+  const startBtn = document.getElementById("demo-start-training");
+
+  if (nameEl) nameEl.textContent = action.name;
+
+  if (imgEl) {
+    imgEl.classList.remove("is-missing");
+    imgEl.src = window.APP_CONFIG.assetUrl(action.image);
+    imgEl.alt = `${action.name}示意图`;
+  }
+
+  if (metaEl) {
+    const parts = [];
+    if (action.sets) parts.push(`${action.sets} 组`);
+    if (action.reps) parts.push(`${action.reps} 次/组`);
+    if (action.frequency) parts.push(action.frequency);
+    metaEl.innerHTML = parts.map((p) => `<span class="tag">${p}</span>`).join("");
+  }
+
+  if (descEl) descEl.textContent = action.description || "按医嘱缓慢完成动作，注意呼吸节奏。";
+
+  if (contraSec && contraEl) {
+    contraSec.hidden = !action.contraindications;
+    contraEl.textContent = action.contraindications || "";
+  }
+
+  if (progSec && progEl) {
+    progSec.hidden = !action.progression;
+    progEl.textContent = action.progression || "";
+  }
+
+  if (videoWrap && videoLink && videoHintEl) {
+    if (action.videoUrl) {
+      videoLink.href = action.videoUrl;
+      videoLink.hidden = false;
+      videoHintEl.textContent = "";
+      videoHintEl.hidden = true;
+      videoWrap.hidden = false;
+    } else if (action.videoHint) {
+      videoLink.hidden = true;
+      videoHintEl.textContent = action.videoHint;
+      videoHintEl.hidden = false;
+      videoWrap.hidden = false;
+    } else {
+      videoWrap.hidden = true;
+    }
+  }
+
+  const poseSupported = window.APP_CONFIG.isPoseSupported(action.id);
+  if (startBtn) {
+    startBtn.hidden = !poseSupported;
+  }
+
+  goToStep("demo");
+}
+
 function startTraining(action) {
   if (!window.APP_CONFIG.isPoseSupported(action.id)) {
     showToast("该动作暂不支持实时纠正，请选择支持的动作进行跟练。");
@@ -1248,10 +1763,16 @@ function startTraining(action) {
 
   state.currentAction = action;
   state.trainingLastScore = null;
+  const completeButton = document.getElementById("complete-training");
+  if (completeButton) {
+    completeButton.disabled = false;
+    completeButton.textContent = "完成训练，返回处方";
+  }
+  if (els.checkinPainBefore) els.checkinPainBefore.value = "";
+  if (els.checkinPainAfter) els.checkinPainAfter.value = "";
+  if (els.checkinNote) els.checkinNote.value = "";
   els.trainingActionName.textContent = `${action.name} · ${action.sets} 组 × ${action.reps} 次${action.frequency ? ` · ${action.frequency}` : ""}`;
-  updateTrainingPoseHint(action.id);
-  updateTrainingActionRef(action);
-  els.feedbackOverlay.textContent = "请先阅读拍摄建议，再启动摄像头";
+  if (els.feedbackOverlay) els.feedbackOverlay.textContent = "准备就绪后点击启动摄像头";
   els.scoreBadge.textContent = "-- 分";
   els.feedbackList.innerHTML = "";
   els.statusText.textContent = "未开始";
@@ -1285,7 +1806,7 @@ async function startCamera() {
 
     state.autoPoseEnabled = true;
     state.poseTracker.start();
-    els.feedbackOverlay.textContent = "等待检测…";
+    if (els.feedbackOverlay) els.feedbackOverlay.textContent = "等待检测…";
     els.statusText.textContent = "实时检测中";
     showToast("摄像头已启动，正在实时分析动作");
   } catch (error) {
@@ -1317,30 +1838,38 @@ function stopCamera() {
 
 function completeTraining() {
   const action = state.currentAction;
+  if (!action) return;
+  state.currentAction = null;
+  const completeButton = document.getElementById("complete-training");
+  if (completeButton) {
+    completeButton.disabled = true;
+    completeButton.textContent = "正在保存…";
+  }
   stopCamera();
   const painBefore = els.checkinPainBefore?.value ? Number(els.checkinPainBefore.value) : null;
   const painAfter = els.checkinPainAfter?.value ? Number(els.checkinPainAfter.value) : null;
   const note = els.checkinNote?.value?.trim() || null;
 
-  const finish = () => {
-    state.currentAction = null;
+  const finish = (message = "训练已完成，可继续跟练其他动作或返回问诊") => {
+    if (completeButton) {
+      completeButton.disabled = false;
+      completeButton.textContent = "完成训练，返回处方";
+    }
     goToStep("prescription");
-    showToast("训练已完成，可继续跟练其他动作或返回问诊");
+    showToast(message);
   };
 
-  if (!action || window.APP_CONFIG.DEMO_MODE || !isSessionReady()) {
+  if (window.APP_CONFIG.DEMO_MODE || !isSessionReady()) {
     finish();
     return;
   }
 
   submitTrainingCheckin(action, { painBefore, painAfter, note })
     .then(() => {
-      showToast("训练打卡已保存");
-      finish();
+      finish("训练打卡已保存");
     })
     .catch((error) => {
-      showToast(typeof error.message === "string" ? error.message : "训练打卡保存失败");
-      finish();
+      finish(typeof error.message === "string" ? error.message : "训练打卡保存失败");
     });
 }
 
@@ -1533,7 +2062,14 @@ function bindEvents() {
   });
 
   els.adminEntryButton?.addEventListener("click", () => goToStep("admin"));
+  bindAdminPanelEvents();
+  bindAdminQuickNavEvents();
   document.getElementById("back-from-admin")?.addEventListener("click", () => goToStep("intake"));
+
+  document.getElementById("demo-start-training")?.addEventListener("click", () => {
+    if (state.currentAction) startTraining(state.currentAction);
+  });
+  document.getElementById("demo-back")?.addEventListener("click", () => goToStep("prescription"));
 
   document.getElementById("start-camera").addEventListener("click", startCamera);
   els.testDoubaoButton?.addEventListener("click", testDoubaoConnection);
@@ -1560,13 +2096,13 @@ function bindEvents() {
   });
   document.getElementById("complete-training").addEventListener("click", completeTraining);
   els.logoutButton?.addEventListener("click", logoutSession);
-
   els.stepButtons().forEach((button) => {
     button.addEventListener("click", () => {
       if (button.disabled) return;
       const step = button.dataset.step;
       if (step !== "login" && !isSessionReady()) return;
-      if (step === "training" && !state.currentAction) return;
+      if ((step === "demo" || step === "training") && !state.currentAction) return;
+      if (step === "training" && !window.APP_CONFIG.isPoseSupported(state.currentAction?.id)) return;
       if (step === "prescription" && !state.prescription) return;
       goToStep(step);
     });

@@ -145,7 +145,6 @@ def training_checkin_response(checkin):
         action_id=checkin.action_id,
         action_name=checkin.action_name,
         trained_on=checkin.trained_on,
-        duration_minutes=checkin.duration_minutes,
         completed_sets=checkin.completed_sets,
         completed_reps=checkin.completed_reps,
         pain_before=checkin.pain_before,
@@ -265,7 +264,6 @@ def clean_training_checkin_payload(req, partial: bool = False):
     if not partial and raw_data.get("trained_on") is None:
         raise HTTPException(status_code=400, detail="trained_on required")
 
-    _validate_number_range(raw_data, "duration_minutes", 0, 600)
     _validate_number_range(raw_data, "completed_sets", 0, 100)
     _validate_number_range(raw_data, "completed_reps", 0, 1000)
     _validate_number_range(raw_data, "pain_before", 0, 10)
@@ -279,7 +277,6 @@ def clean_training_checkin_payload(req, partial: bool = False):
         "action_id": raw_data.get("action_id").strip() if raw_data.get("action_id") else None,
         "action_name": action_name,
         "trained_on": raw_data.get("trained_on"),
-        "duration_minutes": raw_data.get("duration_minutes"),
         "completed_sets": raw_data.get("completed_sets"),
         "completed_reps": raw_data.get("completed_reps"),
         "pain_before": raw_data.get("pain_before"),
@@ -880,7 +877,6 @@ def read_training_visualization_api(
     scores = [checkin.score for checkin in checkins if checkin.score is not None]
     return TrainingVisualizationResponse(
         total_checkins=len(checkins),
-        total_duration_minutes=sum(checkin.duration_minutes or 0 for checkin in checkins),
         active_days=len({checkin.trained_on for checkin in checkins}),
         avg_score=round(sum(scores) / len(scores), 1) if scores else None,
         avg_pain_change=round(sum(pain_changes) / len(pain_changes), 1) if pain_changes else None,
