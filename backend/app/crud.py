@@ -225,7 +225,6 @@ def create_training_checkin(db: Session, request: schema.TrainingCheckinCreateRe
         action_id=request.action_id,
         action_name=request.action_name,
         trained_on=request.trained_on,
-        duration_minutes=request.duration_minutes,
         completed_sets=request.completed_sets,
         completed_reps=request.completed_reps,
         pain_before=request.pain_before,
@@ -296,7 +295,6 @@ def _training_trend_point(day: date, checkins: list[models.TrainingCheckinModel]
     return {
         "date": day,
         "checkin_count": len(checkins),
-        "total_duration_minutes": sum(item.duration_minutes or 0 for item in checkins),
         "avg_pain_before": _average([item.pain_before for item in checkins]),
         "avg_pain_after": _average([item.pain_after for item in checkins]),
         "avg_score": _average([item.score for item in checkins]),

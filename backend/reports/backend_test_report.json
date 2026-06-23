@@ -1,7 +1,7 @@
 {
-  "generated_at": "2026-06-18T02:45:07.192466+00:00",
-  "total": 6,
-  "passed": 6,
+  "generated_at": "2026-06-23T03:35:44.136099+00:00",
+  "total": 11,
+  "passed": 11,
   "failed": 0,
   "status": "passed",
   "cases": [
@@ -21,12 +21,37 @@
       "detail": "通过"
     },
     {
+      "name": "红旗症状处方拦截",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
       "name": "处方生成与导出",
       "status": "passed",
       "detail": "通过"
     },
     {
       "name": "训练打卡与趋势统计",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "实时动作纠正接口",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "康复进度报告",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "知识科普与问答",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "后台管理统计与反馈",
       "status": "passed",
       "detail": "通过"
     },

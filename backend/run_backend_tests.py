@@ -217,7 +217,6 @@ class BackendSmokeSuite:
             "prescription_id": self.created_prescription_id,
             "action_name": "骨盆后倾训练",
             "trained_on": "2026-06-18",
-            "duration_minutes": 10,
             "pain_before": 4,
             "pain_after": 2,
             "score": 88,

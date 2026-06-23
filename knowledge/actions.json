@@ -3,8 +3,15 @@
     {
       "id": "neck_chin_tuck",
       "name": "下巴回收训练",
-      "target_conditions": ["颈椎病", "肩颈疼痛", "姿势不良"],
-      "body_regions": ["颈部", "肩部"],
+      "target_conditions": [
+        "颈椎病",
+        "肩颈疼痛",
+        "姿势不良"
+      ],
+      "body_regions": [
+        "颈部",
+        "肩部"
+      ],
       "sets": 3,
       "reps": 10,
       "frequency": "每日1-2次",
@@ -16,8 +23,13 @@
     {
       "id": "neck_side_bend",
       "name": "颈部侧屈拉伸",
-      "target_conditions": ["颈椎病", "肩颈疼痛"],
-      "body_regions": ["颈部"],
+      "target_conditions": [
+        "颈椎病",
+        "肩颈疼痛"
+      ],
+      "body_regions": [
+        "颈部"
+      ],
       "sets": 3,
       "reps": 1,
       "frequency": "每日1次",
@@ -29,8 +41,14 @@
     {
       "id": "chin_tuck",
       "name": "收下巴训练",
-      "target_conditions": ["颈椎病", "姿势不良", "头前伸"],
-      "body_regions": ["颈部"],
+      "target_conditions": [
+        "颈椎病",
+        "姿势不良",
+        "头前伸"
+      ],
+      "body_regions": [
+        "颈部"
+      ],
       "sets": 3,
       "reps": 10,
       "frequency": "每日1-2次",
@@ -42,8 +60,15 @@
     {
       "id": "scapular_retraction",
       "name": "肩胛后缩训练",
-      "target_conditions": ["肩颈疼痛", "圆肩", "姿势不良"],
-      "body_regions": ["肩部", "颈部"],
+      "target_conditions": [
+        "肩颈疼痛",
+        "圆肩",
+        "姿势不良"
+      ],
+      "body_regions": [
+        "肩部",
+        "颈部"
+      ],
       "sets": 3,
       "reps": 12,
       "frequency": "每周4-5次",
@@ -55,8 +80,15 @@
     {
       "id": "thoracic_extension",
       "name": "胸椎伸展训练",
-      "target_conditions": ["肩颈疼痛", "胸椎活动受限", "姿势不良"],
-      "body_regions": ["肩部", "颈部"],
+      "target_conditions": [
+        "肩颈疼痛",
+        "胸椎活动受限",
+        "姿势不良"
+      ],
+      "body_regions": [
+        "肩部",
+        "颈部"
+      ],
       "sets": 2,
       "reps": 10,
       "frequency": "每日1次",
@@ -68,8 +100,14 @@
     {
       "id": "cat_cow",
       "name": "猫牛式脊柱松动",
-      "target_conditions": ["腰痛", "腰椎活动受限", "久坐僵硬"],
-      "body_regions": ["腰部"],
+      "target_conditions": [
+        "腰痛",
+        "腰椎活动受限",
+        "久坐僵硬"
+      ],
+      "body_regions": [
+        "腰部"
+      ],
       "sets": 2,
       "reps": 8,
       "frequency": "每日1次",
@@ -81,8 +119,13 @@
     {
       "id": "pelvic_tilt",
       "name": "骨盆后倾训练",
-      "target_conditions": ["腰痛", "核心稳定不足"],
-      "body_regions": ["腰部"],
+      "target_conditions": [
+        "腰痛",
+        "核心稳定不足"
+      ],
+      "body_regions": [
+        "腰部"
+      ],
       "sets": 3,
       "reps": 12,
       "frequency": "每日1次",
@@ -94,8 +137,14 @@
     {
       "id": "bird_dog",
       "name": "鸟狗式核心训练",
-      "target_conditions": ["腰痛", "核心稳定不足", "腰椎间盘突出恢复期"],
-      "body_regions": ["腰部"],
+      "target_conditions": [
+        "腰痛",
+        "核心稳定不足",
+        "腰椎间盘突出恢复期"
+      ],
+      "body_regions": [
+        "腰部"
+      ],
       "sets": 3,
       "reps": 8,
       "frequency": "每周3-4次",
@@ -107,8 +156,13 @@
     {
       "id": "dead_bug",
       "name": "死虫式核心训练",
-      "target_conditions": ["腰痛", "核心稳定不足"],
-      "body_regions": ["腰部"],
+      "target_conditions": [
+        "腰痛",
+        "核心稳定不足"
+      ],
+      "body_regions": [
+        "腰部"
+      ],
       "sets": 3,
       "reps": 8,
       "frequency": "每周3-4次",
@@ -120,8 +174,15 @@
     {
       "id": "glute_bridge",
       "name": "臀桥训练",
-      "target_conditions": ["腰痛", "臀肌无力", "核心稳定不足"],
-      "body_regions": ["腰部", "髋部"],
+      "target_conditions": [
+        "腰痛",
+        "臀肌无力",
+        "核心稳定不足"
+      ],
+      "body_regions": [
+        "腰部",
+        "髋部"
+      ],
       "sets": 3,
       "reps": 12,
       "frequency": "每周3-5次",
@@ -133,8 +194,13 @@
     {
       "id": "wall_squat",
       "name": "靠墙静蹲",
-      "target_conditions": ["膝关节疼痛", "股四头肌力量不足"],
-      "body_regions": ["膝关节"],
+      "target_conditions": [
+        "膝关节疼痛",
+        "股四头肌力量不足"
+      ],
+      "body_regions": [
+        "膝关节"
+      ],
       "sets": 3,
       "reps": 1,
       "frequency": "每周3-4次",
@@ -146,8 +212,13 @@
     {
       "id": "straight_leg_raise",
       "name": "直腿抬高训练",
-      "target_conditions": ["膝关节疼痛", "股四头肌力量不足"],
-      "body_regions": ["膝关节"],
+      "target_conditions": [
+        "膝关节疼痛",
+        "股四头肌力量不足"
+      ],
+      "body_regions": [
+        "膝关节"
+      ],
       "sets": 3,
       "reps": 10,
       "frequency": "每日1次",
@@ -159,8 +230,13 @@
     {
       "id": "quad_set",
       "name": "股四头肌等长收缩",
-      "target_conditions": ["膝关节疼痛", "术后早期恢复"],
-      "body_regions": ["膝关节"],
+      "target_conditions": [
+        "膝关节疼痛",
+        "术后早期恢复"
+      ],
+      "body_regions": [
+        "膝关节"
+      ],
       "sets": 3,
       "reps": 12,
       "frequency": "每日1-2次",
@@ -172,8 +248,14 @@
     {
       "id": "calf_stretch",
       "name": "小腿后侧拉伸",
-      "target_conditions": ["踝关节活动受限", "跟腱紧张", "足底不适"],
-      "body_regions": ["踝关节"],
+      "target_conditions": [
+        "踝关节活动受限",
+        "跟腱紧张",
+        "足底不适"
+      ],
+      "body_regions": [
+        "踝关节"
+      ],
       "sets": 3,
       "reps": 2,
       "frequency": "每日1次",
@@ -185,8 +267,14 @@
     {
       "id": "ankle_pump",
       "name": "踝泵运动",
-      "target_conditions": ["踝关节活动受限", "术后肿胀", "久卧活动不足"],
-      "body_regions": ["踝关节"],
+      "target_conditions": [
+        "踝关节活动受限",
+        "术后肿胀",
+        "久卧活动不足"
+      ],
+      "body_regions": [
+        "踝关节"
+      ],
       "sets": 3,
       "reps": 20,
       "frequency": "每日2次",
@@ -198,8 +286,13 @@
     {
       "id": "shoulder_pendulum",
       "name": "肩关节钟摆运动",
-      "target_conditions": ["肩痛", "肩关节活动受限"],
-      "body_regions": ["肩部"],
+      "target_conditions": [
+        "肩痛",
+        "肩关节活动受限"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
       "sets": 2,
       "reps": 15,
       "frequency": "每日1次",
@@ -211,8 +304,13 @@
     {
       "id": "shoulder_external_rotation",
       "name": "肩外旋弹力带训练",
-      "target_conditions": ["肩袖功能不足", "肩痛恢复期"],
-      "body_regions": ["肩部"],
+      "target_conditions": [
+        "肩袖功能不足",
+        "肩痛恢复期"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
       "sets": 3,
       "reps": 10,
       "frequency": "每周3次",
