@@ -127,7 +127,7 @@ def enrich_action_payload(payload: dict) -> dict:
     action.setdefault("equipment", EQUIPMENT_BY_ID.get(action_id, ["徒手"]))
     action.setdefault("image", image)
     action.setdefault("video_url", video_url)
-    action.setdefault("video_hint", f"可搜索：{action.get('name') or action_id} 康复训练 示范")
+    action.setdefault("video_hint", None)
     action.setdefault("image_hint", "建议使用正面或侧面分步示意图，标出关键关节对线和动作方向。")
     action.setdefault("steps", _default_steps(action.get("name") or action_id))
     action.setdefault("common_mistakes", _default_mistakes(category))

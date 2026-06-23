@@ -39,25 +39,6 @@
       "regression": "不适时减少侧屈幅度，保持轻微牵拉感即可。"
     },
     {
-      "id": "chin_tuck",
-      "name": "收下巴训练",
-      "target_conditions": [
-        "颈椎病",
-        "姿势不良",
-        "头前伸"
-      ],
-      "body_regions": [
-        "颈部"
-      ],
-      "sets": 3,
-      "reps": 10,
-      "frequency": "每日1-2次",
-      "description": "坐位或站位，双眼平视前方，下颌微收使后脑勺与衣领贴近，停留5-8秒后放松。",
-      "contraindications": "急性颈椎骨折、严重眩晕发作期暂停。",
-      "progression": "连续3天无疼痛加重后可增加保持时间。",
-      "regression": "出现不适时减少保持时间并放小动作幅度。"
-    },
-    {
       "id": "scapular_retraction",
       "name": "肩胛后缩训练",
       "target_conditions": [
