@@ -3,6 +3,9 @@ uvicorn[standard]
 pydantic
 requests
 SQLAlchemy
+psycopg[binary]
+redis
+minio
 numpy
 python-dotenv
 langchain

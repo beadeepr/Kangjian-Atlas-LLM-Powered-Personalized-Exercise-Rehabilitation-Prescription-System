@@ -49,8 +49,13 @@ def health():
 
 @app.get("/ready")
 def ready():
+    from .cache import check_redis
+    from .object_storage import check_object_storage
+
     database_ok = check_database()
     return {
         "status": "ready" if database_ok else "degraded",
         "database": "ok" if database_ok else "error",
+        "redis": check_redis(),
+        "object_storage": check_object_storage(),
     }

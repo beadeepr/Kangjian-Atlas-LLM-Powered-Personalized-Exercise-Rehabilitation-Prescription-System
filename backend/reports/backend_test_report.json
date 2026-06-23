@@ -1,12 +1,17 @@
 {
-  "generated_at": "2026-06-23T06:57:47.969241+00:00",
-  "total": 15,
-  "passed": 15,
+  "generated_at": "2026-06-23T07:12:21.108307+00:00",
+  "total": 16,
+  "passed": 16,
   "failed": 0,
   "status": "passed",
   "cases": [
     {
       "name": "健康检查",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "生产存储栈配置",
       "status": "passed",
       "detail": "通过"
     },

@@ -56,6 +56,7 @@ class BackendSmokeSuite:
         init_db()
         try:
             self.record("健康检查", self.health)
+            self.record("生产存储栈配置", self.production_storage_config_flow)
             self.record("用户注册与登录", self.auth_flow)
             self.record("患者档案 CRUD", self.patient_profile_flow)
             self.record("红旗症状处方拦截", self.red_flag_prescription_block)
@@ -92,6 +93,23 @@ class BackendSmokeSuite:
         response = self.client.get("/health")
         assert response.status_code == 200, response.text
         assert response.json()["status"] == "ok"
+
+        response = self.client.get("/ready")
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["database"] == "ok"
+        assert data["redis"]["status"] in ("disabled", "ok", "error")
+        assert data["object_storage"]["status"] == "ok"
+
+    def production_storage_config_flow(self):
+        response = self.client.get("/api/deployment/info")
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["database"] == "ok"
+        assert "driver" in data["database_backend"]
+        assert data["redis"]["status"] in ("disabled", "ok", "error")
+        assert data["object_storage"]["backend"] in ("local", "minio")
+        assert data["object_storage"]["status"] == "ok"
 
     def auth_flow(self):
         response = self.client.post("/api/register", json={
@@ -204,6 +222,7 @@ class BackendSmokeSuite:
         assert response.status_code == 201, response.text
         data = response.json()
         assert data["patient_profile_id"] == self.created_profile_id
+        assert data["file_path"]
         assert data["ocr_status"] == "text_file_extracted"
         assert data["risk_level"] == "high"
         assert any(item["code"] == "numbness_or_weakness" for item in data["red_flags"])

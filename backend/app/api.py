@@ -194,11 +194,17 @@ def save_imaging_report_file(user_id: int, file_name: str | None, file_content_b
         raise HTTPException(status_code=400, detail="only png, jpg, jpeg, pdf, txt reports are supported")
 
     digest = hashlib.sha256(content).hexdigest()[:16]
-    upload_dir = Path(__file__).resolve().parents[1] / "uploads" / "imaging_reports" / str(user_id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target = upload_dir / f"{digest}{extension}"
-    target.write_bytes(content)
-    return str(target.relative_to(Path(__file__).resolve().parents[1]))
+    content_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".pdf": "application/pdf",
+        ".txt": "text/plain; charset=utf-8",
+    }
+    object_name = f"imaging_reports/{user_id}/{digest}{extension}"
+    from .object_storage import save_object
+
+    return save_object(content, object_name, content_types.get(extension, "application/octet-stream"))
 
 
 def extract_text_report_content(file_name: str | None, file_content_base64: str | None) -> str | None:
@@ -1161,6 +1167,9 @@ def admin_create_action(req: ActionItem, current_user=Depends(get_admin_user)):
         action = create_action_payload(payload)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    from .cache import cache_delete
+
+    cache_delete("actions:v1")
     return action_item_from_payload(action)
 
 
@@ -1187,6 +1196,9 @@ def admin_update_action(action_id: str, req: ActionUpdateRequest, current_user=D
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
+    from .cache import cache_delete
+
+    cache_delete("actions:v1")
     return action_item_from_payload(action)
 
 
@@ -1197,6 +1209,9 @@ def admin_delete_action(action_id: str, current_user=Depends(get_admin_user)):
     deleted = delete_action_payload(action_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Action not found")
+    from .cache import cache_delete
+
+    cache_delete("actions:v1")
     return {"message": "action deleted"}
 
 
@@ -1212,14 +1227,19 @@ def admin_test_report(current_user=Depends(get_admin_user)):
 
 @router.get("/deployment/info")
 def deployment_info():
-    from .database import check_database
+    from .cache import check_redis
+    from .database import check_database, database_backend
     from .doubao import DOUBAO_BASE_URL, DOUBAO_MODEL_ID
+    from .object_storage import check_object_storage
 
     return {
         "app": "康健图谱 API",
         "environment": os.getenv("APP_ENV", "development"),
         "demo_mode": os.getenv("DEMO_MODE", "false").lower() == "true",
         "database": "ok" if check_database() else "error",
+        "database_backend": database_backend(),
+        "redis": check_redis(),
+        "object_storage": check_object_storage(),
         "cors_origins_configured": bool(os.getenv("CORS_ORIGINS")),
         "doubao_base_url": DOUBAO_BASE_URL,
         "doubao_model_configured": bool(DOUBAO_MODEL_ID),
@@ -1973,8 +1993,19 @@ def list_prescriptions(db: Session = Depends(get_db), current_user=Depends(get_c
 
 @router.get("/actions", response_model=list[ActionItem])
 def list_actions():
+    from .cache import cache_get_json, cache_set_json
     from .knowledge import load_action_library
-    return load_action_library()
+
+    cached = cache_get_json("actions:v1")
+    if cached:
+        return cached
+    actions = load_action_library()
+    cache_payload = [
+        action.model_dump() if hasattr(action, "model_dump") else action.dict()
+        for action in actions
+    ]
+    cache_set_json("actions:v1", cache_payload)
+    return actions
 
 
 @router.get("/knowledge/articles", response_model=KnowledgeArticleListResponse)
