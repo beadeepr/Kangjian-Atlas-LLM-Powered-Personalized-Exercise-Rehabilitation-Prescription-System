@@ -1,4 +1,4 @@
-import re
+﻿import re
 from typing import List, Optional
 
 _MEDICAL_HINTS = (
@@ -13,6 +13,96 @@ _BODY_PART_HINTS = (
     "踝", "肘", "腕", "髋", "腿", "足", "头", "胸", "肌", "关节", "椎",
     "肩周", "腰椎", "颈椎", "胸椎", "髌", "跟腱", "足底", "手臂", "小腿",
     "大腿", "肩胛",
+)
+
+_RED_FLAG_RULES = (
+    {
+        "code": "severe_pain",
+        "label": "剧烈疼痛",
+        "patterns": (
+            r"剧烈疼痛",
+            r"疼痛难忍",
+            r"痛到无法",
+            r"无法忍受",
+            r"夜间痛醒",
+            r"静息痛",
+        ),
+    },
+    {
+        "code": "numbness_or_weakness",
+        "label": "麻木或无力",
+        "patterns": (
+            r"麻木",
+            r"无力",
+            r"乏力",
+            r"肌力下降",
+            r"拿不稳",
+            r"走路不稳",
+            r"脚下踩棉",
+            r"感觉减退",
+        ),
+    },
+    {
+        "code": "bowel_bladder_abnormality",
+        "label": "大小便异常",
+        "patterns": (
+            r"大小便异常",
+            r"大小便失禁",
+            r"尿失禁",
+            r"尿潴留",
+            r"排尿困难",
+            r"排便困难",
+            r"会阴麻木",
+            r"鞍区麻木",
+        ),
+    },
+    {
+        "code": "trauma_related",
+        "label": "外伤后疼痛",
+        "patterns": (
+            r"外伤",
+            r"摔倒",
+            r"跌倒",
+            r"撞伤",
+            r"车祸",
+            r"扭伤后",
+            r"骨折",
+        ),
+    },
+    {
+        "code": "fever_or_infection",
+        "label": "发热或感染风险",
+        "patterns": (
+            r"发热",
+            r"发烧",
+            r"高烧",
+            r"寒战",
+            r"感染",
+            r"红肿热痛",
+        ),
+    },
+    {
+        "code": "rapid_worsening",
+        "label": "症状快速加重",
+        "patterns": (
+            r"快速加重",
+            r"突然加重",
+            r"明显加重",
+            r"持续加重",
+            r"越来越重",
+            r"进行性加重",
+        ),
+    },
+    {
+        "code": "unexplained_weight_loss",
+        "label": "不明原因体重下降",
+        "patterns": (
+            r"体重骤降",
+            r"体重明显下降",
+            r"不明原因消瘦",
+            r"不明原因体重下降",
+        ),
+    },
 )
 
 
@@ -54,3 +144,32 @@ def validate_symptoms(symptoms: str, pain_regions: Optional[List[str]] = None) -
         )
 
     return None
+
+
+def detect_red_flags(symptoms: str, history: Optional[str] = None) -> list[dict]:
+    text = " ".join(part.strip() for part in (symptoms, history or "") if part and part.strip())
+    if not text:
+        return []
+
+    matches = []
+    for rule in _RED_FLAG_RULES:
+        matched_patterns = [
+            pattern
+            for pattern in rule["patterns"]
+            if re.search(pattern, text, flags=re.IGNORECASE)
+        ]
+        if matched_patterns:
+            matches.append({
+                "code": rule["code"],
+                "label": rule["label"],
+                "matched": matched_patterns,
+            })
+    return matches
+
+
+def red_flag_error_message(red_flags: list[dict]) -> str:
+    labels = "、".join(item["label"] for item in red_flags)
+    return (
+        f"检测到红旗症状：{labels}。为避免延误病情，系统已暂停生成普通居家康复训练处方，"
+        "请尽快前往医院或咨询专业医生/康复治疗师。"
+    )

@@ -1,6 +1,10 @@
-from fastapi import APIRouter, Depends, Header, HTTPException, Response
+﻿from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy.orm import Session
 from datetime import date, timedelta
+from pathlib import Path
+import base64
+import binascii
+import hashlib
 import re
 import os
 import json
@@ -10,6 +14,7 @@ from .crud import (
     authenticate_user,
     build_training_trends,
     create_patient_profile,
+    create_imaging_report,
     create_prescription,
     create_pose_feedback,
     create_training_checkin,
@@ -17,10 +22,12 @@ from .crud import (
     delete_patient_profile,
     delete_training_checkin,
     get_actions_by_prescription,
+    get_imaging_report,
     get_patient_profile,
     get_prescription,
     get_training_checkin,
     get_user_by_account,
+    list_imaging_reports,
     list_patient_profiles,
     list_prescriptions as crud_list_prescriptions,
     list_training_checkins,
@@ -31,6 +38,16 @@ from .database import SessionLocal
 from .schema import (
     ActionItem,
     ActionUpdateRequest,
+    AdminDashboardResponse,
+    AdminUserSummary,
+    FeedbackCreateRequest,
+    FeedbackResponse,
+    FeedbackUpdateRequest,
+    ImagingReportCreateRequest,
+    ImagingReportResponse,
+    KnowledgeArticleListResponse,
+    KnowledgeQARequest,
+    KnowledgeQAResponse,
     LoginResponse,
     PatientProfileCreateRequest,
     PatientProfileResponse,
@@ -42,6 +59,8 @@ from .schema import (
     TrainingCheckinCreateRequest,
     TrainingCheckinResponse,
     TrainingCheckinUpdateRequest,
+    TrainingReportActionSummary,
+    TrainingReportResponse,
     TrainingTrendPoint,
     TrainingTrendResponse,
     TrainingVisualizationResponse,
@@ -108,6 +127,65 @@ def training_checkin_response(checkin):
         score=checkin.score,
         note=checkin.note,
     )
+
+
+def imaging_report_response(report):
+    return ImagingReportResponse(
+        id=report.id,
+        user_id=report.user_id,
+        patient_profile_id=report.patient_profile_id,
+        report_type=report.report_type,
+        file_name=report.file_name,
+        file_path=report.file_path,
+        ocr_text=report.ocr_text,
+        ocr_status=report.ocr_status,
+        risk_level=report.risk_level,
+        red_flags=report.red_flags,
+        note=report.note,
+        created_at=report.created_at,
+    )
+
+
+def save_imaging_report_file(user_id: int, file_name: str | None, file_content_base64: str | None) -> str | None:
+    if not file_content_base64:
+        return None
+    if not file_name:
+        raise HTTPException(status_code=400, detail="file_name required when file_content_base64 is provided")
+
+    try:
+        content = base64.b64decode(file_content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(status_code=400, detail="file_content_base64 is invalid")
+    if not content:
+        raise HTTPException(status_code=400, detail="uploaded file is empty")
+    if len(content) > 5 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="uploaded file must be <= 5MB")
+
+    safe_name = Path(file_name).name
+    extension = Path(safe_name).suffix.lower()
+    allowed_extensions = {".png", ".jpg", ".jpeg", ".pdf", ".txt"}
+    if extension not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="only png, jpg, jpeg, pdf, txt reports are supported")
+
+    digest = hashlib.sha256(content).hexdigest()[:16]
+    upload_dir = Path(__file__).resolve().parents[1] / "uploads" / "imaging_reports" / str(user_id)
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    target = upload_dir / f"{digest}{extension}"
+    target.write_bytes(content)
+    return str(target.relative_to(Path(__file__).resolve().parents[1]))
+
+
+def extract_text_report_content(file_name: str | None, file_content_base64: str | None) -> str | None:
+    if not file_name or not file_content_base64:
+        return None
+    if Path(file_name).suffix.lower() != ".txt":
+        return None
+    try:
+        content = base64.b64decode(file_content_base64, validate=True)
+    except (binascii.Error, ValueError):
+        return None
+    text = content.decode("utf-8", errors="ignore").strip()
+    return text or None
 
 
 def clean_patient_profile_payload(req, partial: bool = False):
@@ -255,6 +333,14 @@ def clean_action_payload(req: ActionItem | ActionUpdateRequest, partial: bool = 
         raise HTTPException(status_code=400, detail="action name required")
     _validate_number_range(raw_data, "sets", 1, 20)
     _validate_number_range(raw_data, "reps", 1, 200)
+    allowed_difficulties = {"初级", "中级", "高级"}
+    allowed_risks = {"低", "中", "高"}
+    difficulty_level = raw_data.get("difficulty_level")
+    risk_level = raw_data.get("risk_level")
+    if difficulty_level is not None and difficulty_level not in allowed_difficulties:
+        raise HTTPException(status_code=400, detail="difficulty_level must be 初级, 中级 or 高级")
+    if risk_level is not None and risk_level not in allowed_risks:
+        raise HTTPException(status_code=400, detail="risk_level must be 低, 中 or 高")
 
     cleaned = {
         "id": action_id,
@@ -263,6 +349,20 @@ def clean_action_payload(req: ActionItem | ActionUpdateRequest, partial: bool = 
         "body_regions": raw_data.get("body_regions") or [],
         "sets": raw_data.get("sets"),
         "reps": raw_data.get("reps"),
+        "category": raw_data.get("category").strip() if raw_data.get("category") else None,
+        "difficulty_level": difficulty_level,
+        "stage": raw_data.get("stage").strip() if raw_data.get("stage") else None,
+        "target_muscles": raw_data.get("target_muscles") or [],
+        "equipment": raw_data.get("equipment") or [],
+        "demo_media": raw_data.get("demo_media"),
+        "image": raw_data.get("image").strip() if raw_data.get("image") else None,
+        "video_url": raw_data.get("video_url").strip() if raw_data.get("video_url") else None,
+        "video_hint": raw_data.get("video_hint").strip() if raw_data.get("video_hint") else None,
+        "image_hint": raw_data.get("image_hint").strip() if raw_data.get("image_hint") else None,
+        "steps": raw_data.get("steps") or [],
+        "common_mistakes": raw_data.get("common_mistakes") or [],
+        "correct_cues": raw_data.get("correct_cues") or [],
+        "risk_level": risk_level,
         "frequency": raw_data.get("frequency").strip() if raw_data.get("frequency") else None,
         "description": raw_data.get("description").strip() if raw_data.get("description") else None,
         "note": raw_data.get("note").strip() if raw_data.get("note") else None,
@@ -279,11 +379,28 @@ def clean_action_payload(req: ActionItem | ActionUpdateRequest, partial: bool = 
 
 
 def action_item_from_payload(payload: dict):
+    from .action_metadata import enrich_action_payload
+
+    payload = enrich_action_payload(payload)
     return ActionItem(
         id=payload.get("id"),
         name=payload.get("name"),
         sets=payload.get("sets", 1),
         reps=payload.get("reps", 1),
+        category=payload.get("category"),
+        difficulty_level=payload.get("difficulty_level"),
+        stage=payload.get("stage"),
+        target_muscles=payload.get("target_muscles"),
+        equipment=payload.get("equipment"),
+        demo_media=payload.get("demo_media"),
+        image=payload.get("image"),
+        video_url=payload.get("video_url"),
+        video_hint=payload.get("video_hint"),
+        image_hint=payload.get("image_hint"),
+        steps=payload.get("steps"),
+        common_mistakes=payload.get("common_mistakes"),
+        correct_cues=payload.get("correct_cues"),
+        risk_level=payload.get("risk_level"),
         note=payload.get("note") or payload.get("description"),
         description=payload.get("description"),
         frequency=payload.get("frequency"),
@@ -413,6 +530,36 @@ def get_optional_user(
     return _resolve_user_from_token(authorization, db)
 
 
+def clean_feedback_payload(req: FeedbackCreateRequest):
+    category = (req.category or "general").strip() or "general"
+    content = req.content.strip() if req.content else ""
+    if not content:
+        raise HTTPException(status_code=400, detail="feedback content required")
+    if len(content) > 2000:
+        raise HTTPException(status_code=400, detail="feedback content too long")
+    if req.rating is not None and not 1 <= req.rating <= 5:
+        raise HTTPException(status_code=400, detail="rating must be between 1 and 5")
+    return {
+        "category": category[:64],
+        "rating": req.rating,
+        "content": content,
+        "contact": req.contact.strip()[:128] if req.contact else None,
+        "source": req.source.strip()[:64] if req.source else None,
+    }
+
+
+def clean_feedback_update(req: FeedbackUpdateRequest):
+    data = req.model_dump(exclude_unset=True) if hasattr(req, "model_dump") else req.dict(exclude_unset=True)
+    allowed_status = {"open", "processing", "resolved", "closed"}
+    if "status" in data and data["status"] is not None:
+        data["status"] = data["status"].strip()
+        if data["status"] not in allowed_status:
+            raise HTTPException(status_code=400, detail="status must be one of: open, processing, resolved, closed")
+    if "admin_note" in data and data["admin_note"] is not None:
+        data["admin_note"] = data["admin_note"].strip()
+    return data
+
+
 @router.post("/register", response_model=UserResponse, status_code=201)
 def register(req: UserCreateRequest, db: Session = Depends(get_db)):
     account = req.account.strip()
@@ -530,6 +677,82 @@ def delete_patient_profile_api(
     return {"message": "patient profile deleted"}
 
 
+@router.get("/imaging_reports", response_model=list[ImagingReportResponse])
+def list_imaging_report_api(
+    patient_profile_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if patient_profile_id is not None:
+        profile = get_patient_profile(db, profile_id=patient_profile_id, user_id=current_user.id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Patient profile not found")
+    reports = list_imaging_reports(db, user_id=current_user.id, patient_profile_id=patient_profile_id)
+    return [imaging_report_response(report) for report in reports]
+
+
+@router.post("/imaging_reports", response_model=ImagingReportResponse, status_code=201)
+def create_imaging_report_api(
+    req: ImagingReportCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .validators import detect_red_flags
+
+    if req.patient_profile_id is not None:
+        profile = get_patient_profile(db, profile_id=req.patient_profile_id, user_id=current_user.id)
+        if not profile:
+            raise HTTPException(status_code=404, detail="Patient profile not found")
+    if not req.file_content_base64 and not req.ocr_text:
+        raise HTTPException(status_code=400, detail="file_content_base64 or ocr_text required")
+
+    report_type = req.report_type.strip() if req.report_type else "影像报告"
+    file_name = Path(req.file_name).name if req.file_name else None
+    ocr_text = req.ocr_text.strip() if req.ocr_text else None
+    extracted_text = None if ocr_text else extract_text_report_content(file_name, req.file_content_base64)
+    ocr_text = ocr_text or extracted_text
+
+    file_path = save_imaging_report_file(current_user.id, file_name, req.file_content_base64)
+    red_flags = detect_red_flags(ocr_text or "")
+    risk_level = "high" if red_flags else ("low" if ocr_text else "unknown")
+    if req.ocr_text:
+        ocr_status = "provided"
+    elif extracted_text:
+        ocr_status = "text_file_extracted"
+    else:
+        ocr_status = "pending_external_ocr"
+
+    cleaned = ImagingReportCreateRequest(
+        patient_profile_id=req.patient_profile_id,
+        report_type=report_type,
+        file_name=file_name,
+        ocr_text=ocr_text,
+        note=req.note.strip() if req.note else None,
+    )
+    report = create_imaging_report(
+        db,
+        cleaned,
+        user_id=current_user.id,
+        file_path=file_path,
+        ocr_status=ocr_status,
+        risk_level=risk_level,
+        red_flags=red_flags,
+    )
+    return imaging_report_response(report)
+
+
+@router.get("/imaging_reports/{report_id}", response_model=ImagingReportResponse)
+def read_imaging_report_api(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    report = get_imaging_report(db, report_id=report_id, user_id=current_user.id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Imaging report not found")
+    return imaging_report_response(report)
+
+
 @router.get("/training_checkins", response_model=list[TrainingCheckinResponse])
 def list_training_checkin_api(
     patient_profile_id: int | None = None,
@@ -636,6 +859,79 @@ def read_training_visualization_api(
     )
 
 
+@router.get("/training_checkins/report", response_model=TrainingReportResponse)
+def read_training_report_api(
+    patient_profile_id: int | None = None,
+    period: str = "weekly",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .progress_reports import build_training_report, normalize_report_dates
+
+    try:
+        period, start_date, end_date = normalize_report_dates(period, start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if patient_profile_id is not None:
+        validate_training_links(db, current_user.id, patient_profile_id, None)
+    report = build_training_report(
+        db,
+        user_id=current_user.id,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        patient_profile_id=patient_profile_id,
+    )
+    return TrainingReportResponse(**report)
+
+
+@router.get("/training_checkins/report/export")
+def export_training_report_api(
+    patient_profile_id: int | None = None,
+    period: str = "weekly",
+    start_date: date | None = None,
+    end_date: date | None = None,
+    format: str = "md",
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .progress_reports import build_training_report, normalize_report_dates, render_training_report_markdown
+
+    export_format = format.lower()
+    if export_format not in {"md", "txt", "json"}:
+        raise HTTPException(status_code=400, detail="format must be one of: md, txt, json")
+    try:
+        period, start_date, end_date = normalize_report_dates(period, start_date, end_date)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    if patient_profile_id is not None:
+        validate_training_links(db, current_user.id, patient_profile_id, None)
+    report = build_training_report(
+        db,
+        user_id=current_user.id,
+        period=period,
+        start_date=start_date,
+        end_date=end_date,
+        patient_profile_id=patient_profile_id,
+    )
+    if export_format == "json":
+        content = json.dumps(report, ensure_ascii=False, indent=2, default=str)
+        media_type = "application/json; charset=utf-8"
+        extension = "json"
+    else:
+        content = render_training_report_markdown(report)
+        media_type = "text/markdown; charset=utf-8" if export_format == "md" else "text/plain; charset=utf-8"
+        extension = export_format
+    filename = f"training_report_{period}_{start_date}_{end_date}.{extension}"
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.get("/training_checkins/{checkin_id}", response_model=TrainingCheckinResponse)
 def read_training_checkin_api(
     checkin_id: int,
@@ -687,6 +983,83 @@ def delete_training_checkin_api(
     return {"message": "training checkin deleted"}
 
 
+@router.post("/feedback", response_model=FeedbackResponse, status_code=201)
+def submit_feedback(
+    req: FeedbackCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_optional_user),
+):
+    from .admin_management import create_feedback, feedback_response
+
+    payload = clean_feedback_payload(req)
+    feedback = create_feedback(
+        db,
+        user_id=current_user.id if current_user else None,
+        **payload,
+    )
+    return FeedbackResponse(**feedback_response(feedback))
+
+
+@router.get("/admin/dashboard", response_model=AdminDashboardResponse)
+def admin_dashboard(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    from .admin_management import build_admin_dashboard
+
+    return AdminDashboardResponse(**build_admin_dashboard(db))
+
+
+@router.get("/admin/users", response_model=list[AdminUserSummary])
+def admin_list_users(
+    q: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    from .admin_management import list_admin_users
+
+    return [AdminUserSummary(**item) for item in list_admin_users(db, q=q, limit=limit, offset=offset)]
+
+
+@router.get("/admin/feedback", response_model=list[FeedbackResponse])
+def admin_list_feedback(
+    status: str | None = None,
+    category: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    from .admin_management import feedback_response, list_feedback
+
+    items = list_feedback(db, status=status, category=category, limit=limit, offset=offset)
+    return [FeedbackResponse(**feedback_response(item)) for item in items]
+
+
+@router.put("/admin/feedback/{feedback_id}", response_model=FeedbackResponse)
+def admin_update_feedback(
+    feedback_id: int,
+    req: FeedbackUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_admin_user),
+):
+    from .admin_management import feedback_response
+
+    feedback = db.query(models.UserFeedbackModel).filter(models.UserFeedbackModel.id == feedback_id).first()
+    if not feedback:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    updates = clean_feedback_update(req)
+    if not updates:
+        raise HTTPException(status_code=400, detail="no fields to update")
+    for field, value in updates.items():
+        setattr(feedback, field, value)
+    db.commit()
+    db.refresh(feedback)
+    return FeedbackResponse(**feedback_response(feedback))
+
+
 @router.get("/admin/actions", response_model=list[ActionItem])
 def admin_list_actions(
     q: str | None = None,
@@ -724,8 +1097,9 @@ def admin_list_actions(
 @router.get("/admin/actions/meta")
 def admin_action_meta(current_user=Depends(get_admin_user)):
     from .knowledge import load_action_catalog
+    from .action_metadata import enrich_action_payload
 
-    actions = load_action_catalog()
+    actions = [enrich_action_payload(action) for action in load_action_catalog()]
     body_regions = sorted({
         region
         for action in actions
@@ -736,10 +1110,16 @@ def admin_action_meta(current_user=Depends(get_admin_user)):
         for action in actions
         for condition in (action.get("target_conditions") or [])
     })
+    categories = sorted({action.get("category") for action in actions if action.get("category")})
+    difficulty_levels = sorted({action.get("difficulty_level") for action in actions if action.get("difficulty_level")})
+    risk_levels = sorted({action.get("risk_level") for action in actions if action.get("risk_level")})
     return {
         "total": len(actions),
         "body_regions": body_regions,
         "target_conditions": target_conditions,
+        "categories": categories,
+        "difficulty_levels": difficulty_levels,
+        "risk_levels": risk_levels,
     }
 
 
@@ -825,7 +1205,7 @@ def generate_prescription(
     db: Session = Depends(get_db),
     current_user=Depends(get_optional_user),
 ):
-    from .validators import validate_pain_regions, validate_symptoms
+    from .validators import detect_red_flags, red_flag_error_message, validate_pain_regions, validate_symptoms
 
     if not req.symptoms:
         raise HTTPException(status_code=400, detail="symptoms required")
@@ -849,6 +1229,17 @@ def generate_prescription(
     if current_user:
         patient_name = patient_name or current_user.nickname
         patient_age = patient_age if patient_age is not None else current_user.age
+
+    red_flags = detect_red_flags(req.symptoms, patient_history)
+    if red_flags:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "red_flag_detected",
+                "message": red_flag_error_message(red_flags),
+                "red_flags": red_flags,
+            },
+        )
 
     pain_region_error = validate_pain_regions(pain_regions)
     if pain_region_error:
@@ -962,6 +1353,34 @@ def list_prescriptions(db: Session = Depends(get_db), current_user=Depends(get_c
 def list_actions():
     from .knowledge import load_action_library
     return load_action_library()
+
+
+@router.get("/knowledge/articles", response_model=KnowledgeArticleListResponse)
+def list_knowledge_articles(
+    q: str | None = None,
+    body_region: str | None = None,
+    limit: int = 10,
+):
+    from .education import build_knowledge_articles
+
+    return KnowledgeArticleListResponse(
+        items=build_knowledge_articles(q=q, body_region=body_region, limit=limit)
+    )
+
+
+@router.post("/knowledge/qa", response_model=KnowledgeQAResponse)
+def ask_knowledge_question(req: KnowledgeQARequest):
+    from .education import answer_knowledge_question
+
+    try:
+        result = answer_knowledge_question(
+            question=req.question,
+            pain_regions=req.pain_regions,
+            limit=req.limit or 4,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return KnowledgeQAResponse(**result)
 
 
 @router.post("/test_doubao")

@@ -1,4 +1,4 @@
-from sqlalchemy.orm import Session
+﻿from sqlalchemy.orm import Session
 from . import models, schema
 import base64
 import hashlib
@@ -142,6 +142,51 @@ def update_patient_profile(
 def delete_patient_profile(db: Session, profile: models.PatientProfileModel):
     db.delete(profile)
     db.commit()
+
+
+def list_imaging_reports(db: Session, user_id: int, patient_profile_id: int | None = None):
+    query = db.query(models.ImagingReportModel).filter(models.ImagingReportModel.user_id == user_id)
+    if patient_profile_id is not None:
+        query = query.filter(models.ImagingReportModel.patient_profile_id == patient_profile_id)
+    return query.order_by(models.ImagingReportModel.created_at.desc()).all()
+
+
+def get_imaging_report(db: Session, report_id: int, user_id: int):
+    return (
+        db.query(models.ImagingReportModel)
+        .filter(
+            models.ImagingReportModel.id == report_id,
+            models.ImagingReportModel.user_id == user_id,
+        )
+        .first()
+    )
+
+
+def create_imaging_report(
+    db: Session,
+    request: schema.ImagingReportCreateRequest,
+    user_id: int,
+    file_path: str | None,
+    ocr_status: str,
+    risk_level: str,
+    red_flags: list[dict],
+):
+    report = models.ImagingReportModel(
+        user_id=user_id,
+        patient_profile_id=request.patient_profile_id,
+        report_type=request.report_type,
+        file_name=request.file_name,
+        file_path=file_path,
+        ocr_text=request.ocr_text,
+        ocr_status=ocr_status,
+        risk_level=risk_level,
+        red_flags=red_flags,
+        note=request.note,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return report
 
 
 def list_training_checkins(
@@ -290,10 +335,17 @@ def create_prescription(
 ):
     from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_prescription
     from .doubao import generate_prescription_summary
+    from .safety import evaluate_prescription_safety
 
     selected_actions = select_actions_for_prescription(
         symptoms=prescription.symptoms,
         pain_regions=prescription.pain_regions,
+        history=prescription.history,
+        mobility_score=prescription.mobility_score,
+    )
+    selected_actions, safety = evaluate_prescription_safety(
+        selected_actions,
+        symptoms=prescription.symptoms,
         history=prescription.history,
         mobility_score=prescription.mobility_score,
     )
@@ -323,6 +375,7 @@ def create_prescription(
         "model_text": result.get("text"),
         "model_json": parsed,
         "raw": result.get("raw"),
+        "safety": safety,
     } if isinstance(result, dict) else None
 
     db_prescription = models.PrescriptionModel(

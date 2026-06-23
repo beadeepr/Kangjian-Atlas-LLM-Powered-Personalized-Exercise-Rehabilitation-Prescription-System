@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, JSON, String, Text
+﻿from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -71,6 +71,8 @@ class UserModel(Base):
     prescriptions = relationship('PrescriptionModel', back_populates='user')
     patient_profiles = relationship('PatientProfileModel', back_populates='user', cascade='all, delete-orphan')
     training_checkins = relationship('TrainingCheckinModel', back_populates='user', cascade='all, delete-orphan')
+    imaging_reports = relationship('ImagingReportModel', back_populates='user', cascade='all, delete-orphan')
+    feedback_items = relationship('UserFeedbackModel', back_populates='user', cascade='all, delete-orphan')
 
 
 class PatientProfileModel(Base):
@@ -96,6 +98,28 @@ class PatientProfileModel(Base):
     user = relationship('UserModel', back_populates='patient_profiles')
     prescriptions = relationship('PrescriptionModel', back_populates='patient_profile')
     training_checkins = relationship('TrainingCheckinModel', back_populates='patient_profile')
+    imaging_reports = relationship('ImagingReportModel', back_populates='patient_profile', cascade='all, delete-orphan')
+
+
+class ImagingReportModel(Base):
+    __tablename__ = 'imaging_reports'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
+    patient_profile_id = Column(Integer, ForeignKey('patient_profiles.id'), nullable=True, index=True)
+    report_type = Column(String(64), nullable=True)
+    file_name = Column(String(256), nullable=True)
+    file_path = Column(String(512), nullable=True)
+    ocr_text = Column(Text, nullable=True)
+    ocr_status = Column(String(32), nullable=False, default='pending')
+    risk_level = Column(String(32), nullable=False, default='unknown')
+    red_flags = Column(JSON, nullable=True)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
+
+    user = relationship('UserModel', back_populates='imaging_reports')
+    patient_profile = relationship('PatientProfileModel', back_populates='imaging_reports')
 
 
 class TrainingCheckinModel(Base):
@@ -122,3 +146,21 @@ class TrainingCheckinModel(Base):
     user = relationship('UserModel', back_populates='training_checkins')
     patient_profile = relationship('PatientProfileModel', back_populates='training_checkins')
     prescription = relationship('PrescriptionModel', back_populates='training_checkins')
+
+
+class UserFeedbackModel(Base):
+    __tablename__ = 'user_feedback'
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey('users.id'), nullable=True, index=True)
+    category = Column(String(64), nullable=False, default='general')
+    rating = Column(Integer, nullable=True)
+    content = Column(Text, nullable=False)
+    contact = Column(String(128), nullable=True)
+    source = Column(String(64), nullable=True)
+    status = Column(String(32), nullable=False, default='open', index=True)
+    admin_note = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=now)
+    updated_at = Column(DateTime, default=now, onupdate=now)
+
+    user = relationship('UserModel', back_populates='feedback_items')

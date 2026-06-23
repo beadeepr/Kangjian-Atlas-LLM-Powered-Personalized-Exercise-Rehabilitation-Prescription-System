@@ -1,6 +1,7 @@
-import json
+﻿import json
 from pathlib import Path
 from typing import List, Optional
+from .action_metadata import enrich_action_payload
 from .schema import ActionItem
 
 BASE_DIR = Path(__file__).resolve().parents[2]
@@ -89,6 +90,20 @@ def load_action_library() -> List[ActionItem]:
         name=item['name'],
         sets=item.get('sets', 1),
         reps=item.get('reps', 1),
+        category=item.get('category'),
+        difficulty_level=item.get('difficulty_level'),
+        stage=item.get('stage'),
+        target_muscles=item.get('target_muscles'),
+        equipment=item.get('equipment'),
+        demo_media=item.get('demo_media'),
+        image=item.get('image'),
+        video_url=item.get('video_url'),
+        video_hint=item.get('video_hint'),
+        image_hint=item.get('image_hint'),
+        steps=item.get('steps'),
+        common_mistakes=item.get('common_mistakes'),
+        correct_cues=item.get('correct_cues'),
+        risk_level=item.get('risk_level'),
         note=item.get('note') or item.get('description'),
         description=item.get('description'),
         frequency=item.get('frequency'),
@@ -97,7 +112,7 @@ def load_action_library() -> List[ActionItem]:
         regression=item.get('regression'),
         body_regions=item.get('body_regions', []),
         target_conditions=item.get('target_conditions', []),
-    ) for item in data.get('actions', [])]
+    ) for item in (enrich_action_payload(item) for item in data.get('actions', []))]
 
 
 def _score_action(
