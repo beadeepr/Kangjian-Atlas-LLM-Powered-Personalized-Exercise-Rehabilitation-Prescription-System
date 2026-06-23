@@ -63,11 +63,17 @@ def create_user(db: Session, request: schema.UserCreateRequest) -> schema.UserRe
         for account in os.getenv("ADMIN_ACCOUNTS", "admin").split(",")
         if account.strip()
     }
+    doctor_accounts = {
+        account.strip().lower()
+        for account in os.getenv("DOCTOR_ACCOUNTS", "doctor").split(",")
+        if account.strip()
+    }
+    role = "admin" if request.account.lower() in admin_accounts else "doctor" if request.account.lower() in doctor_accounts else "user"
     user = models.UserModel(
         account=request.account,
         password_hash=_hash_password(request.password),
         nickname=request.nickname,
-        role="admin" if request.account.lower() in admin_accounts else "user",
+        role=role,
         gender=request.gender,
         age=request.age,
     )
@@ -335,7 +341,22 @@ def create_prescription(
 ):
     from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_prescription
     from .doubao import generate_prescription_summary
+    from .rag import contexts_to_prompt, retrieve_contexts
     from .safety import evaluate_prescription_safety
+
+    rag_contexts = retrieve_contexts(
+        query=f"{prescription.symptoms} {prescription.history or ''}",
+        limit=5,
+        body_regions=prescription.pain_regions,
+    )
+    rag_prompt_context = contexts_to_prompt(rag_contexts)
+    prompt_template = load_prompt_template()
+    if rag_prompt_context:
+        prompt_template = (
+            f"{prompt_template}\n\n"
+            "请优先参考以下 RAG 检索到的康复知识上下文，并且不要编造未出现在候选动作库中的动作：\n"
+            "{rag_contexts}\n"
+        )
 
     selected_actions = select_actions_for_prescription(
         symptoms=prescription.symptoms,
@@ -359,7 +380,7 @@ def create_prescription(
         actions=action_payload,
         pain_regions=prescription.pain_regions,
         mobility_score=prescription.mobility_score,
-        prompt_template=load_prompt_template(),
+        prompt_template=prompt_template.replace("{rag_contexts}", rag_prompt_context or "暂无额外检索上下文"),
     )
     parsed = result.get("json") if isinstance(result, dict) else None
     model_summary = parsed.get("summary") if isinstance(parsed, dict) else None
@@ -376,6 +397,7 @@ def create_prescription(
         "model_json": parsed,
         "raw": result.get("raw"),
         "safety": safety,
+        "rag_contexts": rag_contexts,
     } if isinstance(result, dict) else None
 
     db_prescription = models.PrescriptionModel(

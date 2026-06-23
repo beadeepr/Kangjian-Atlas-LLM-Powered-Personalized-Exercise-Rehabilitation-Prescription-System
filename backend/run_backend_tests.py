@@ -32,6 +32,8 @@ class BackendSmokeSuite:
         self.admin_account = "admin"
         self.user_headers: dict[str, str] = {}
         self.admin_headers: dict[str, str] = {}
+        self.doctor_headers: dict[str, str] = {}
+        self.doctor_account = f"doctor_{self.unique}"
         self.created_profile_id: int | None = None
         self.created_prescription_id: int | None = None
         self.created_checkin_id: int | None = None
@@ -60,6 +62,10 @@ class BackendSmokeSuite:
             self.record("处方生成与导出", self.prescription_export_flow)
             self.record("训练打卡与趋势统计", self.training_flow)
             self.record("实时动作纠正接口", self.pose_correction_flow)
+            self.record("RTMPose流式推理接口", self.pose_streaming_flow)
+            self.record("3D骨骼与AR叠加服务", self.visual_overlay_flow)
+            self.record("语音纠错与疲劳监测", self.voice_and_fatigue_flow)
+            self.record("医生协同与处方动态调整闭环", self.doctor_collaboration_flow)
             self.record("康复进度报告", self.progress_report_flow)
             self.record("知识科普与问答", self.knowledge_education_flow)
             self.record("后台管理统计与反馈", self.admin_management_flow)
@@ -116,6 +122,21 @@ class BackendSmokeSuite:
         assert admin_login.status_code == 200, admin_login.text
         assert admin_login.json()["user"]["role"] == "admin"
         self.admin_headers = {"Authorization": "Bearer " + admin_login.json()["token"]}
+
+        os.environ["DOCTOR_ACCOUNTS"] = self.doctor_account
+        response = self.client.post("/api/register", json={
+            "account": self.doctor_account,
+            "password": "123456",
+            "nickname": "协同医生",
+        })
+        assert response.status_code == 201, response.text
+        assert response.json()["role"] == "doctor"
+        doctor_login = self.client.post("/api/login", json={
+            "account": self.doctor_account,
+            "password": "123456",
+        })
+        assert doctor_login.status_code == 200, doctor_login.text
+        self.doctor_headers = {"Authorization": "Bearer " + doctor_login.json()["token"]}
 
     def patient_profile_flow(self):
         response = self.client.post("/api/patient_profiles", headers=self.user_headers, json={
@@ -235,6 +256,22 @@ class BackendSmokeSuite:
         assert response.json()["total_checkins"] >= 1
 
     def pose_correction_flow(self):
+        keypoints, visibility = self.sample_pose_keypoints()
+        for action_id in ("calf_stretch", "ankle_pump", "neck_chin_tuck"):
+            response = self.client.post("/api/correct_pose", json={
+                "action_id": action_id,
+                "keypoints": keypoints,
+                "visibility": visibility,
+                "timestamp": 1,
+            })
+            assert response.status_code == 200, response.text
+            data = response.json()
+            assert data["status"] in ("ok", "warning")
+            assert isinstance(data["score"], int)
+            assert data["feedback"]
+            assert data["voice_cue"]["text"]
+
+    def sample_pose_keypoints(self):
         keypoints = [[0.5, 0.5, 0.0] for _ in range(33)]
         keypoints[0] = [0.50, 0.10, 0.0]
         keypoints[7] = [0.44, 0.14, 0.0]
@@ -256,19 +293,216 @@ class BackendSmokeSuite:
         keypoints[31] = [0.42, 0.86, 0.0]
         keypoints[32] = [0.58, 0.86, 0.0]
         visibility = [1.0 for _ in range(33)]
+        return keypoints, visibility
 
-        for action_id in ("calf_stretch", "ankle_pump", "neck_chin_tuck"):
-            response = self.client.post("/api/correct_pose", json={
-                "action_id": action_id,
+    def pose_streaming_flow(self):
+        keypoints, visibility = self.sample_pose_keypoints()
+        response = self.client.get("/api/pose/status", headers=self.user_headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["mode"] in ("onnx", "keypoint_passthrough")
+
+        response = self.client.post("/api/pose/infer_frame", headers=self.user_headers, json={
+            "action_id": "neck_chin_tuck",
+            "frame_id": "frame-1",
+            "keypoints": keypoints,
+            "visibility": visibility,
+            "timestamp": 1,
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["frame_id"] == "frame-1"
+        assert data["provider"] == "keypoint_passthrough"
+        assert data["feedback"]
+        assert data["skeleton_3d"]["format"] == "kangjian_skeleton_v1"
+        assert data["ar_overlay"]["format"] == "kangjian_ar_overlay_v1"
+
+        response = self.client.post("/api/pose/infer_batch", headers=self.user_headers, json={
+            "frames": [
+                {
+                    "action_id": "neck_chin_tuck",
+                    "frame_id": "batch-1",
+                    "keypoints": keypoints,
+                    "visibility": visibility,
+                },
+                {
+                    "action_id": "calf_stretch",
+                    "frame_id": "batch-2",
+                    "keypoints": keypoints,
+                    "visibility": visibility,
+                },
+            ]
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["batch_size"] == 2
+        assert len(data["results"]) == 2
+        assert data["session_id"]
+
+        with self.client.websocket_connect("/api/pose/ws") as websocket:
+            session = websocket.receive_json()
+            assert session["type"] == "session"
+            websocket.send_json({
+                "action_id": "neck_chin_tuck",
+                "frame_id": "ws-1",
                 "keypoints": keypoints,
                 "visibility": visibility,
-                "timestamp": 1,
             })
-            assert response.status_code == 200, response.text
-            data = response.json()
-            assert data["status"] in ("ok", "warning")
-            assert isinstance(data["score"], int)
-            assert data["feedback"]
+            message = websocket.receive_json()
+            assert message["type"] == "feedback"
+            assert message["frame_id"] == "ws-1"
+            assert message["voice_cue"]["text"]
+            assert message["skeleton_3d"]["joints"]
+            assert message["ar_overlay"]["items"]
+            websocket.send_json({"type": "close"})
+            assert websocket.receive_json()["type"] == "closed"
+
+    def visual_overlay_flow(self):
+        keypoints, visibility = self.sample_pose_keypoints()
+        response = self.client.get("/api/visual/skeleton/spec", headers=self.user_headers)
+        assert response.status_code == 200, response.text
+        spec = response.json()
+        assert spec["landmark_format"] == "mediapipe_pose_33"
+        assert len(spec["landmarks"]) == 33
+        assert spec["bones"]
+
+        response = self.client.post("/api/visual/skeleton/frame", headers=self.user_headers, json={
+            "action_id": "neck_chin_tuck",
+            "keypoints": keypoints,
+            "visibility": visibility,
+        })
+        assert response.status_code == 200, response.text
+        skeleton = response.json()["skeleton_3d"]
+        assert skeleton["format"] == "kangjian_skeleton_v1"
+        assert len(skeleton["joints"]) == 33
+        assert skeleton["bones"]
+
+        response = self.client.post("/api/visual/ar/overlay", headers=self.user_headers, json={
+            "action_id": "neck_chin_tuck",
+            "keypoints": keypoints,
+            "visibility": visibility,
+            "feedback": ["下巴回收还不够，请缓慢向后收。"],
+            "status": "warning",
+            "score": 72,
+            "viewport_width": 720,
+            "viewport_height": 1280,
+            "mirror": True,
+        })
+        assert response.status_code == 200, response.text
+        overlay = response.json()["ar_overlay"]
+        assert overlay["format"] == "kangjian_ar_overlay_v1"
+        assert overlay["viewport"]["mirror"] is True
+        assert overlay["items"]
+
+    def voice_and_fatigue_flow(self):
+        response = self.client.post("/api/voice/cue", headers=self.user_headers, json={
+            "feedback": ["动作幅度还不够，请缓慢抬高一点。"],
+            "status": "warning",
+            "score": 72,
+        })
+        assert response.status_code == 200, response.text
+        data = response.json()
+        assert data["enabled"] is True
+        assert data["text"]
+        assert data["ssml"]
+        assert data["priority"] == "medium"
+
+        response = self.client.post("/api/wearables/metrics", headers=self.user_headers, json={
+            "patient_profile_id": self.created_profile_id,
+            "training_checkin_id": self.created_checkin_id,
+            "device_type": "test_band",
+            "heart_rate": 156,
+            "resting_heart_rate": 72,
+            "hrv_ms": 22,
+            "spo2": 96,
+            "perceived_exertion": 8,
+            "duration_minutes": 45,
+        })
+        assert response.status_code == 201, response.text
+        metric = response.json()
+        assert metric["fatigue_score"] >= 45
+        assert metric["risk_level"] in ("medium", "high")
+        assert metric["recommendation"]
+
+        response = self.client.get("/api/wearables/fatigue/status", headers=self.user_headers)
+        assert response.status_code == 200, response.text
+        status = response.json()
+        assert status["sample_count"] >= 1
+        assert status["fatigue_score"] >= 0
+        assert status["recommendation"]
+
+        response = self.client.get("/api/wearables/metrics", headers=self.user_headers)
+        assert response.status_code == 200, response.text
+        assert any(item["id"] == metric["id"] for item in response.json())
+
+    def doctor_collaboration_flow(self):
+        response = self.client.post("/api/doctor_links", headers=self.user_headers, json={
+            "doctor_account": self.doctor_account,
+            "patient_profile_id": self.created_profile_id,
+            "patient_note": "希望医生帮忙审核腰痛处方。",
+        })
+        assert response.status_code == 201, response.text
+        link = response.json()
+        assert link["status"] == "active"
+
+        response = self.client.get("/api/doctor/patients", headers=self.doctor_headers)
+        assert response.status_code == 200, response.text
+        assert any(item["id"] == link["id"] for item in response.json())
+
+        response = self.client.post(
+            f"/api/prescriptions/{self.created_prescription_id}/reviews/share",
+            headers=self.user_headers,
+            json={"doctor_account": self.doctor_account, "patient_note": "训练后腰部偶有酸胀。"},
+        )
+        assert response.status_code == 201, response.text
+        review = response.json()
+        assert review["status"] == "pending"
+
+        response = self.client.get("/api/doctor/reviews?status=pending", headers=self.doctor_headers)
+        assert response.status_code == 200, response.text
+        assert any(item["id"] == review["id"] for item in response.json())
+
+        response = self.client.put(
+            f"/api/doctor/reviews/{review['id']}",
+            headers=self.doctor_headers,
+            json={"status": "changes_requested", "doctor_note": "建议先降低训练量。", "risk_level": "medium"},
+        )
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "changes_requested"
+
+        response = self.client.post(
+            f"/api/doctor/reviews/{review['id']}/adjustments",
+            headers=self.doctor_headers,
+            json={
+                "reason": "医生建议降低训练负荷并观察疼痛变化。",
+                "summary": "医生调整版：降低前两项动作组数，保持无痛范围。",
+                "action_changes": [
+                    {"operation": "update", "name": "骨盆后倾训练", "sets": 2, "reps": 8, "note": "医生建议低强度执行。"}
+                ],
+            },
+        )
+        assert response.status_code == 201, response.text
+        adjustment = response.json()
+        assert adjustment["source"] == "doctor"
+        assert adjustment["status"] == "proposed"
+
+        response = self.client.post(
+            f"/api/prescription_adjustments/{adjustment['id']}/decision",
+            headers=self.user_headers,
+            json={"decision": "apply"},
+        )
+        assert response.status_code == 200, response.text
+        decided = response.json()
+        assert decided["status"] == "applied"
+        assert decided["created_prescription_id"]
+
+        response = self.client.post(
+            f"/api/prescriptions/{self.created_prescription_id}/adjustments/auto",
+            headers=self.user_headers,
+        )
+        assert response.status_code == 201, response.text
+        auto_adjustment = response.json()
+        assert auto_adjustment["source"] == "system"
+        assert auto_adjustment["adjusted_actions"]
 
     def progress_report_flow(self):
         response = self.client.get("/api/training_checkins/report?period=weekly", headers=self.user_headers)
@@ -287,6 +521,18 @@ class BackendSmokeSuite:
         assert "康复进度报告" in response.text
 
     def knowledge_education_flow(self):
+        response = self.client.get("/api/knowledge/rag/status", headers=self.user_headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["provider"] in ("local", "chroma", "qdrant")
+
+        response = self.client.post("/api/knowledge/rag/search", headers=self.user_headers, json={
+            "query": "腰痛核心稳定训练",
+            "body_regions": ["腰部"],
+            "limit": 3,
+        })
+        assert response.status_code == 200, response.text
+        assert response.json()["results"]
+
         response = self.client.get("/api/knowledge/articles?body_region=腰部", headers=self.user_headers)
         assert response.status_code == 200, response.text
         data = response.json()
@@ -302,6 +548,7 @@ class BackendSmokeSuite:
         data = response.json()
         assert "腰部" in data["answer"]
         assert data["references"]
+        assert data["rag_contexts"]
         assert data["suggested_actions"]
         assert data["safety_notes"]
 
@@ -346,6 +593,13 @@ class BackendSmokeSuite:
     def admin_knowledge_flow(self):
         response = self.client.get("/api/admin/actions", headers=self.user_headers)
         assert response.status_code == 403, response.text
+
+        response = self.client.post("/api/knowledge/rag/reindex", headers=self.user_headers)
+        assert response.status_code == 403, response.text
+
+        response = self.client.post("/api/knowledge/rag/reindex", headers=self.admin_headers)
+        assert response.status_code == 200, response.text
+        assert response.json()["indexed_documents"] >= 1
 
         response = self.client.get("/api/admin/actions/meta", headers=self.admin_headers)
         assert response.status_code == 200, response.text

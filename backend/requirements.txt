@@ -5,3 +5,11 @@ requests
 SQLAlchemy
 numpy
 python-dotenv
+langchain
+langchain-text-splitters
+langgraph
+chromadb
+qdrant-client
+onnxruntime
+opencv-python-headless
+aiortc
