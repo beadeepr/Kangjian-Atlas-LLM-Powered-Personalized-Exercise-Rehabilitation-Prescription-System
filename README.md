@@ -6,13 +6,13 @@
 【康健图谱】——基于大模型的个性化运动康复处方生成系统
 
 ### 项目描述
-本项目是一个面向运动康复场景的个性化处方生成系统。系统通过前端采集用户主诉、疼痛部位、活动度评分等信息，后端结合结构化康复知识库和豆包大模型生成康复处方，并提供基于姿态关键点的动作纠正反馈。
+本项目是一个面向运动康复场景的个性化处方生成系统。系统通过前端采集用户主诉、疼痛部位、活动度评分等信息，后端结合结构化康复知识库和 DeepSeek 大模型生成康复处方，并提供基于姿态关键点的动作纠正反馈。
 
 当前版本已完成可运行 MVP：
 
 - FastAPI 后端 API 服务
 - SQLite 数据库存储处方和姿态反馈
-- 豆包/火山方舟大模型集成
+- DeepSeek/火山方舟大模型集成
 - 康复动作知识库与提示词模板
 - 处方生成 API
 - 姿态纠正 API
@@ -34,7 +34,7 @@
 
 - 后端：FastAPI、Python、SQLAlchemy、SQLite
 - 前端：HTML、CSS、JavaScript
-- AI/LLM：豆包/火山方舟 OpenAI 兼容接口
+- AI/LLM：DeepSeek/火山方舟 OpenAI 兼容接口
 - 知识库：JSON 结构化动作库
 - 姿态纠正：基于关键点的规则算法
 
@@ -69,7 +69,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy RemoteSigned
 pip install -r backend/requirements.txt
 ```
 
-### 4. 配置豆包 API
+### 4. 配置 DeepSeek API
 
 复制 `.env.sample` 为 `.env`：
 
@@ -77,19 +77,19 @@ pip install -r backend/requirements.txt
 Copy-Item .env.sample .env
 ```
 
-在 `.env` 中填写自己的火山方舟/豆包配置：
+在 `.env` 中填写自己的火山方舟/DeepSeek 配置：
 
 ```env
-DOUBAO_API_KEY=your_api_key
-DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-DOUBAO_MODEL_ID=your_model_id
+DeepSeek_API_KEY=your_api_key
+DeepSeek_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+DeepSeek_MODEL_ID=your_model_id
 ```
 
 注意：
 
 - `.env` 是本地私密文件，已加入 `.gitignore`。
 - 不要把真实 API Key 写入 `.env.sample`。
-- 如果豆包调用失败，后端会使用本地兜底摘要，保证演示流程不中断。
+- 如果 DeepSeek 调用失败，后端会使用本地兜底摘要，保证演示流程不中断。
 
 ### 5. 启动后端
 
@@ -148,10 +148,10 @@ Invoke-RestMethod http://localhost:8000/health
 Invoke-RestMethod http://localhost:8000/api/actions | ConvertTo-Json -Depth 10
 ```
 
-### 测试豆包连通性
+### 测试 DeepSeek 连通性
 
 ```powershell
-Invoke-RestMethod -Method POST -Uri http://localhost:8000/api/test_doubao |
+Invoke-RestMethod -Method POST -Uri http://localhost:8000/api/test_deepseek |
   ConvertTo-Json -Depth 10
 ```
 
@@ -207,7 +207,7 @@ Invoke-RestMethod -Method POST -Uri http://localhost:8000/api/correct_pose `
 
 ### 2. 大模型集成与知识库
 
-- 豆包 API 接入
+- DeepSeek API 接入
 - `.env` 自动加载
 - 结构化动作知识库
 - 知识库候选动作检索
@@ -248,7 +248,7 @@ Kangjian-Atlas-LLM-Powered-Personalized-Exercise-Rehabilitation-Prescription-Sys
 │   │   ├── models.py            # SQLAlchemy 模型
 │   │   ├── schema.py            # Pydantic 请求/响应模型
 │   │   ├── knowledge.py         # 知识库读取与检索
-│   │   ├── doubao.py            # 豆包 API 调用封装
+│   │   ├── doubao.py            # DeepSeek API 调用封装
 │   │   └── algorithms.py        # 姿态纠正算法
 │   └── requirements.txt
 ├── frontend/
@@ -313,7 +313,7 @@ Kangjian-Atlas-LLM-Powered-Personalized-Exercise-Rehabilitation-Prescription-Sys
 ## 更新日志
 
 - 2026-06-12：项目初始化，建立基础项目结构。
-- 2026-06-12：完成 FastAPI 后端、SQLite 数据模型、知识库、豆包集成、处方生成 API 和姿态纠正 API。
+- 2026-06-12：完成 FastAPI 后端、SQLite 数据模型、知识库、DeepSeek 集成、处方生成 API 和姿态纠正 API。
 
 ---
 
