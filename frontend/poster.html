@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>康健图谱 — 视觉海报</title>
+<style>
+/* ===== 1. CSS Variables & Reset ===== */
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg-primary:#0a0f1a;
+  --bg-secondary:#111827;
+  --bg-card:rgba(255,255,255,0.04);
+  --text-primary:#f0f4ff;
+  --text-secondary:#94a3b8;
+  --text-muted:#64748b;
+  --accent-blue:#38bdf8;
+  --accent-cyan:#2dd4bf;
+  --accent-orange:#f59e0b;
+  --accent-rose:#fb7185;
+  --gradient-main:linear-gradient(135deg,#38bdf8,#2dd4bf);
+  --gradient-warm:linear-gradient(135deg,#f59e0b,#fb7185);
+  --gradient-deep:linear-gradient(135deg,#0a1628,#1a2a4a);
+  --border-glow:rgba(56,189,248,0.15);
+  --shadow-glow:0 0 60px rgba(56,189,248,0.08);
+  --radius-sm:8px;
+  --radius-md:16px;
+  --radius-lg:24px;
+  --radius-xl:32px;
+  --font-sans:'Segoe UI','PingFang SC','Microsoft YaHei',system-ui,-apple-system,sans-serif;
+  --font-mono:'JetBrains Mono','Fira Code','Consolas',monospace;
+}
+body{
+  font-family:var(--font-sans);
+  background:var(--bg-primary);
+  color:var(--text-primary);
+  overflow-x:hidden;
+  min-height:100vh;
+}
+
+/* ===== 2. Poster Container ===== */
+.poster{
+  position:relative;
+  width:100%;
+  max-width:1200px;
+  margin:0 auto;
+  min-height:100vh;
+  padding:60px 48px 40px;
+  background:radial-gradient(ellipse at 20% 20%,rgba(56,189,248,0.06) 0%,transparent 50%),
+              radial-gradient(ellipse at 80% 80%,rgba(45,212,191,0.05) 0%,transparent 50%),
+              var(--bg-primary);
+  overflow:hidden;
+}
+@media(max-width:768px){
+  .poster{padding:36px 20px 28px}
+}
+
+/* ===== 3. Ambient Background Grid ===== */
+.bg-grid{
+  position:absolute;
+  inset:0;
+  background-image:linear-gradient(rgba(56,189,248,0.03) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(56,189,248,0.03) 1px,transparent 1px);
+  background-size:60px 60px;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* ===== 4. Floating Particles (Canvas) ===== */
+#particleCanvas{
+  position:fixed;
+  inset:0;
+  pointer-events:none;
+  z-index:0;
+}
+
+/* ===== 5. Decorative Orbs ===== */
+.orb{
+  position:absolute;
+  border-radius:50%;
+  filter:blur(80px);
+  pointer-events:none;
+  z-index:0;
+}
+.orb-1{
+  width:500px;height:500px;
+  background:rgba(56,189,248,0.08);
+  top:-200px;right:-150px;
+  animation:orbFloat 12s ease-in-out infinite;
+}
+.orb-2{
+  width:400px;height:400px;
+  background:rgba(45,212,191,0.06);
+  bottom:-150px;left:-100px;
+  animation:orbFloat 15s ease-in-out infinite reverse;
+}
+.orb-3{
+  width:300px;height:300px;
+  background:rgba(245,158,11,0.05);
+  bottom:30%;right:10%;
+  animation:orbFloat 18s ease-in-out infinite 3s;
+}
+@keyframes orbFloat{
+  0%,100%{transform:translate(0,0) scale(1)}
+  25%{transform:translate(40px,-30px) scale(1.05)}
+  50%{transform:translate(-20px,-50px) scale(0.95)}
+  75%{transform:translate(30px,20px) scale(1.02)}
+}
+
+/* ===== 6. Header / Top Bar ===== */
+.header{
+  position:relative;
+  z-index:2;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding-bottom:24px;
+  border-bottom:1px solid rgba(255,255,255,0.06);
+  margin-bottom:40px;
+}
+.header-left{
+  display:flex;align-items:center;gap:12px;
+}
+.logo-icon{
+  width:40px;height:40px;
+  border-radius:12px;
+  background:var(--gradient-main);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:20px;
+  font-weight:700;
+  color:#0a0f1a;
+  box-shadow:0 0 30px rgba(56,189,248,0.25);
+}
+.logo-text{
+  font-size:14px;
+  font-weight:600;
+  letter-spacing:0.5px;
+  color:var(--text-secondary);
+}
+.logo-text span{color:var(--text-primary)}
+.header-badge{
+  display:flex;align-items:center;gap:6px;
+  padding:6px 14px;
+  border-radius:20px;
+  background:rgba(56,189,248,0.1);
+  border:1px solid rgba(56,189,248,0.15);
+  font-size:11px;
+  color:var(--accent-blue);
+  letter-spacing:0.5px;
+}
+.header-badge .dot{
+  width:6px;height:6px;
+  border-radius:50%;
+  background:var(--accent-blue);
+  animation:pulseDot 2s ease-in-out infinite;
+}
+@keyframes pulseDot{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:0.4;transform:scale(0.8)}
+}
+@media(max-width:768px){
+  .header-badge{display:none}
+}
+
+/* ===== 7. Hero Section ===== */
+.hero{
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:60px;
+  margin-bottom:56px;
+  align-items:center;
+}
+@media(max-width:900px){
+  .hero{grid-template-columns:1fr;gap:40px}
+}
+
+.hero-content{}
+.hero-tag{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:6px 16px 6px 8px;
+  border-radius:20px;
+  background:rgba(45,212,191,0.1);
+  border:1px solid rgba(45,212,191,0.15);
+  font-size:12px;
+  color:var(--accent-cyan);
+  letter-spacing:0.3px;
+  margin-bottom:20px;
+}
+.hero-tag .icon{width:18px;height:18px}
+
+.hero-title{
+  font-size:clamp(36px,5vw,56px);
+  font-weight:800;
+  line-height:1.1;
+  letter-spacing:-1px;
+  margin-bottom:16px;
+}
+.hero-title .gradient{
+  background:var(--gradient-main);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.hero-title .highlight{
+  background:var(--gradient-warm);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.hero-sub{
+  font-size:clamp(14px,1.2vw,17px);
+  color:var(--text-secondary);
+  line-height:1.7;
+  margin-bottom:28px;
+  max-width:520px;
+}
+
+.hero-cta-group{
+  display:flex;gap:12px;flex-wrap:wrap;
+}
+.hero-cta{
+  display:inline-flex;align-items:center;gap:8px;
+  padding:12px 28px;
+  border-radius:12px;
+  font-size:14px;
+  font-weight:600;
+  text-decoration:none;
+  transition:all 0.3s cubic-bezier(0.16,1,0.3,1);
+  cursor:default;
+}
+.hero-cta.primary{
+  background:var(--gradient-main);
+  color:#0a0f1a;
+  box-shadow:0 4px 20px rgba(56,189,248,0.3);
+}
+.hero-cta.primary:hover{
+  transform:translateY(-2px) scale(1.02);
+  box-shadow:0 8px 30px rgba(56,189,248,0.35);
+}
+.hero-cta.secondary{
+  background:rgba(255,255,255,0.05);
+  border:1px solid rgba(255,255,255,0.1);
+  color:var(--text-primary);
+}
+.hero-cta.secondary:hover{
+  background:rgba(255,255,255,0.1);
+  transform:translateY(-2px);
+}
+
+/* ===== 8. Visual Side (Human Body + Neural) ===== */
+.hero-visual{
+  position:relative;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  min-height:400px;
+}
+@media(max-width:900px){
+  .hero-visual{min-height:320px}
+}
+
+.body-silhouette{
+  position:relative;
+  width:260px;
+  height:400px;
+}
+@media(max-width:900px){
+  .body-silhouette{width:200px;height:320px}
+}
+@media(max-width:480px){
+  .body-silhouette{width:160px;height:260px}
+}
+
+/* SVG body shape */
+.body-svg{
+  width:100%;height:100%;
+}
+.body-svg .head{
+  fill:rgba(56,189,248,0.08);
+  stroke:rgba(56,189,248,0.3);
+  stroke-width:1.5;
+}
+.body-svg .torso{
+  fill:rgba(56,189,248,0.05);
+  stroke:rgba(56,189,248,0.2);
+  stroke-width:1.2;
+}
+.body-svg .limb{
+  fill:none;
+  stroke:rgba(56,189,248,0.2);
+  stroke-width:1.2;
+  stroke-linecap:round;
+}
+.body-svg .joint{
+  fill:var(--accent-cyan);
+  opacity:0.7;
+  animation:jointPulse 3s ease-in-out infinite;
+}
+.body-svg .joint:nth-child(odd){animation-delay:0.5s}
+.body-svg .joint:nth-child(3n){animation-delay:1s}
+@keyframes jointPulse{
+  0%,100%{r:5;opacity:0.6}
+  50%{r:8;opacity:1}
+}
+
+/* Neural connection lines */
+.neural-lines svg{
+  position:absolute;
+  inset:0;
+  width:100%;height:100%;
+  pointer-events:none;
+}
+.neural-path{
+  stroke:rgba(56,189,248,0.12);
+  stroke-width:0.8;
+  fill:none;
+  stroke-dasharray:4 6;
+  animation:neuralFlow 8s linear infinite;
+}
+.neural-path:nth-child(2n){animation-direction:reverse;animation-duration:6s}
+.neural-path:nth-child(3n){animation-duration:10s}
+@keyframes neuralFlow{
+  to{stroke-dashoffset:-100}
+}
+
+/* Floating labels around body */
+.floating-label{
+  position:absolute;
+  padding:6px 14px;
+  border-radius:8px;
+  font-size:11px;
+  font-weight:500;
+  letter-spacing:0.5px;
+  white-space:nowrap;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.06);
+  backdrop-filter:blur(8px);
+  animation:labelFloat 4s ease-in-out infinite;
+}
+.floating-label:nth-child(2){animation-delay:0.8s}
+.floating-label:nth-child(3){animation-delay:1.6s}
+.floating-label:nth-child(4){animation-delay:2.4s}
+.floating-label:nth-child(5){animation-delay:3.2s}
+.floating-label:nth-child(6){animation-delay:0.4s}
+
+@keyframes labelFloat{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(-6px)}
+}
+
+.label-1{top:5%;left:-90px;color:var(--accent-blue)}
+.label-2{top:18%;right:-70px;color:var(--accent-cyan)}
+.label-3{top:38%;left:-80px;color:var(--accent-orange)}
+.label-4{top:55%;right:-65px;color:var(--accent-rose)}
+.label-5{top:72%;left:-95px;color:var(--accent-blue)}
+.label-6{top:85%;right:-75px;color:var(--accent-cyan)}
+
+.label-dot{
+  display:inline-block;
+  width:5px;height:5px;
+  border-radius:50%;
+  margin-right:6px;
+  vertical-align:middle;
+}
+
+/* ===== 9. Stats Bar ===== */
+.stats-bar{
+  position:relative;
+  z-index:2;
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:1px;
+  background:rgba(255,255,255,0.04);
+  border-radius:var(--radius-md);
+  border:1px solid rgba(255,255,255,0.06);
+  margin-bottom:56px;
+  overflow:hidden;
+}
+@media(max-width:640px){
+  .stats-bar{grid-template-columns:repeat(2,1fr);border-radius:var(--radius-sm)}
+}
+.stat-item{
+  padding:24px 20px;
+  text-align:center;
+  background:rgba(255,255,255,0.02);
+  transition:background 0.3s;
+}
+.stat-item:hover{background:rgba(255,255,255,0.05)}
+.stat-number{
+  font-size:28px;
+  font-weight:800;
+  letter-spacing:-0.5px;
+  margin-bottom:4px;
+  background:var(--gradient-main);
+  -webkit-background-clip:text;
+  -webkit-text-fill-color:transparent;
+  background-clip:text;
+}
+.stat-label{
+  font-size:12px;
+  color:var(--text-muted);
+  letter-spacing:0.5px;
+}
+
+.count-up{
+  display:inline-block;
+}
+
+/* ===== 10. Features Section ===== */
+.features{
+  position:relative;
+  z-index:2;
+  margin-bottom:48px;
+}
+.features-header{
+  text-align:center;
+  margin-bottom:36px;
+}
+.features-header h2{
+  font-size:clamp(22px,2.5vw,32px);
+  font-weight:700;
+  margin-bottom:8px;
+}
+.features-header p{
+  color:var(--text-secondary);
+  font-size:14px;
+}
+
+.feature-grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  gap:12px;
+}
+@media(max-width:900px){
+  .feature-grid{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:480px){
+  .feature-grid{grid-template-columns:1fr}
+}
+
+.feature-card{
+  position:relative;
+  padding:24px 20px;
+  border-radius:var(--radius-md);
+  background:var(--bg-card);
+  border:1px solid rgba(255,255,255,0.05);
+  transition:all 0.4s cubic-bezier(0.16,1,0.3,1);
+  overflow:hidden;
+  cursor:default;
+}
+.feature-card::before{
+  content:'';
+  position:absolute;
+  inset:0;
+  border-radius:var(--radius-md);
+  background:linear-gradient(135deg,rgba(56,189,248,0.05),transparent);
+  opacity:0;
+  transition:opacity 0.4s;
+}
+.feature-card:hover{
+  transform:translateY(-4px);
+  border-color:rgba(56,189,248,0.15);
+  box-shadow:0 12px 40px rgba(0,0,0,0.3);
+}
+.feature-card:hover::before{opacity:1}
+
+.feature-icon{
+  width:40px;height:40px;
+  border-radius:10px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:18px;
+  margin-bottom:14px;
+  position:relative;
+  z-index:1;
+}
+.feature-card:nth-child(1) .feature-icon{background:rgba(56,189,248,0.15);color:var(--accent-blue)}
+.feature-card:nth-child(2) .feature-icon{background:rgba(45,212,191,0.15);color:var(--accent-cyan)}
+.feature-card:nth-child(3) .feature-icon{background:rgba(245,158,11,0.15);color:var(--accent-orange)}
+.feature-card:nth-child(4) .feature-icon{background:rgba(251,113,133,0.15);color:var(--accent-rose)}
+
+.feature-card h3{
+  font-size:15px;
+  font-weight:600;
+  margin-bottom:6px;
+  position:relative;
+  z-index:1;
+}
+.feature-card p{
+  font-size:12px;
+  color:var(--text-secondary);
+  line-height:1.6;
+  position:relative;
+  z-index:1;
+}
+
+/* ===== 11. Tech Stack ===== */
+.tech-strip{
+  position:relative;
+  z-index:2;
+  display:flex;
+  align-items:center;
+  gap:24px;
+  padding:16px 0;
+  margin-bottom:40px;
+  border-top:1px solid rgba(255,255,255,0.05);
+  border-bottom:1px solid rgba(255,255,255,0.05);
+  flex-wrap:wrap;
+}
+.tech-strip-label{
+  font-size:11px;
+  color:var(--text-muted);
+  letter-spacing:1px;
+  text-transform:uppercase;
+  flex-shrink:0;
+}
+.tech-strip-items{
+  display:flex;
+  gap:16px;
+  flex-wrap:wrap;
+}
+.tech-chip{
+  padding:4px 14px;
+  border-radius:6px;
+  font-size:11px;
+  font-weight:500;
+  background:rgba(255,255,255,0.04);
+  border:1px solid rgba(255,255,255,0.06);
+  color:var(--text-secondary);
+  letter-spacing:0.3px;
+  transition:all 0.3s;
+}
+.tech-chip:hover{
+  background:rgba(56,189,248,0.1);
+  border-color:rgba(56,189,248,0.2);
+  color:var(--accent-blue);
+}
+
+/* ===== 12. Footer ===== */
+.footer{
+  position:relative;
+  z-index:2;
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  padding-top:24px;
+  border-top:1px solid rgba(255,255,255,0.05);
+  font-size:12px;
+  color:var(--text-muted);
+  flex-wrap:wrap;
+  gap:12px;
+}
+.footer-team{
+  display:flex;
+  gap:20px;
+  flex-wrap:wrap;
+}
+.footer-team span{
+  color:var(--text-secondary);
+}
+.footer-team em{
+  font-style:normal;
+  color:var(--text-muted);
+}
+@media(max-width:640px){
+  .footer{flex-direction:column;align-items:flex-start}
+}
+
+/* ===== 13. Scroll Animations ===== */
+.reveal{
+  opacity:0;
+  transform:translateY(30px);
+  transition:all 0.8s cubic-bezier(0.16,1,0.3,1);
+}
+.reveal.visible{
+  opacity:1;
+  transform:translateY(0);
+}
+.reveal-delay-1{transition-delay:0.1s}
+.reveal-delay-2{transition-delay:0.2s}
+.reveal-delay-3{transition-delay:0.3s}
+.reveal-delay-4{transition-delay:0.4s}
+
+/* ===== 14. Glow Line Decorations ===== */
+.glow-line{
+  position:absolute;
+  height:1px;
+  background:linear-gradient(90deg,transparent,rgba(56,189,248,0.2),transparent);
+  pointer-events:none;
+  z-index:0;
+}
+
+/* ===== 15. Print-ready ===== */
+@media print{
+  .poster{max-width:100%;padding:20mm}
+  #particleCanvas{display:none}
+  .orb{display:none}
+  body{background:white;color:#111}
+  .stat-number{-webkit-text-fill-color:#0ea5e9}
+  .hero-title .gradient{-webkit-text-fill-color:#0ea5e9}
+  .hero-title .highlight{-webkit-text-fill-color:#f59e0b}
+}
+</style>
+</head>
+<body>
+
+<!-- ===== Particle Canvas ===== -->
+<canvas id="particleCanvas"></canvas>
+
+<div class="poster">
+
+  <!-- Background -->
+  <div class="bg-grid"></div>
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+  <div class="glow-line" style="top:32%;left:10%;width:80%"></div>
+  <div class="glow-line" style="top:68%;left:5%;width:90%"></div>
+
+  <!-- ===== Header ===== -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo-icon">K</div>
+      <div class="logo-text">
+        <div>康健图谱</div>
+        <div style="font-size:10px;color:var(--text-muted)">Kangjian Atlas</div>
+      </div>
+    </div>
+    <div class="header-badge">
+      <span class="dot"></span>
+      AI · 康复医学 · 个性化处方
+    </div>
+  </header>
+
+  <!-- ===== Hero ===== -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-tag">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+        </svg>
+        基于大模型的个性化运动康复
+      </div>
+      <h1 class="hero-title">
+        <span class="gradient">康健图谱</span><br>
+        将康复治疗师<br>
+        <span class="highlight">装进手机</span>
+      </h1>
+      <p class="hero-sub">
+        用一次评估，获取一份专属康复处方。AI 驱动的姿态检测与实时纠正，
+        让运动损伤和慢性病患者在家也能获得专业级康复指导。
+      </p>
+      <div class="hero-cta-group">
+        <span class="hero-cta primary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+            <polygon points="5 3 19 12 5 21 5 3"/>
+          </svg>
+          观看演示
+        </span>
+        <span class="hero-cta secondary">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 015.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/>
+          </svg>
+          了解技术方案
+        </span>
+      </div>
+    </div>
+
+    <!-- Visual Side -->
+    <div class="hero-visual">
+      <div class="body-silhouette" style="position:relative">
+
+        <!-- Floating Labels -->
+        <div class="floating-label label-1"><span class="label-dot" style="background:var(--accent-blue)"></span>姿态估计</div>
+        <div class="floating-label label-2"><span class="label-dot" style="background:var(--accent-cyan)"></span>实时纠正</div>
+        <div class="floating-label label-3"><span class="label-dot" style="background:var(--accent-orange)"></span>知识图谱</div>
+        <div class="floating-label label-4"><span class="label-dot" style="background:var(--accent-rose)"></span>处方生成</div>
+        <div class="floating-label label-5"><span class="label-dot" style="background:var(--accent-blue)"></span>动作跟练</div>
+        <div class="floating-label label-6"><span class="label-dot" style="background:var(--accent-cyan)"></span>进度追踪</div>
+
+        <!-- Body SVG -->
+        <svg class="body-svg" viewBox="0 0 260 400" xmlns="http://www.w3.org/2000/svg">
+          <!-- Head -->
+          <ellipse class="head" cx="130" cy="45" rx="30" ry="35"/>
+          <!-- Neck -->
+          <line class="limb" x1="130" y1="80" x2="130" y2="100"/>
+          <!-- Torso -->
+          <path class="torso" d="M100 100 Q130 95 160 100 L165 210 Q130 220 95 210 Z"/>
+          <!-- Left Arm -->
+          <path class="limb" d="M100 110 Q75 130 60 170 Q50 195 55 220"/>
+          <!-- Right Arm -->
+          <path class="limb" d="M160 110 Q185 130 200 170 Q210 195 205 220"/>
+          <!-- Left Leg -->
+          <path class="limb" d="M110 210 Q105 280 100 360 Q98 375 100 385"/>
+          <!-- Right Leg -->
+          <path class="limb" d="M150 210 Q155 280 160 360 Q162 375 160 385"/>
+          
+          <!-- Joint Keypoints -->
+          <circle class="joint" cx="130" cy="45" r="6"/>
+          <circle class="joint" cx="130" cy="100" r="5"/>
+          <circle class="joint" cx="100" cy="110" r="5"/>
+          <circle class="joint" cx="160" cy="110" r="5"/>
+          <circle class="joint" cx="55" cy="220" r="5"/>
+          <circle class="joint" cx="205" cy="220" r="5"/>
+          <circle class="joint" cx="130" cy="200" r="6"/>
+          <circle class="joint" cx="100" cy="210" r="5"/>
+          <circle class="joint" cx="160" cy="210" r="5"/>
+          <circle class="joint" cx="100" cy="385" r="5"/>
+          <circle class="joint" cx="160" cy="385" r="5"/>
+
+          <!-- Skeleton connecting lines -->
+          <line x1="130" y1="45" x2="130" y2="100" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+          <line x1="130" y1="100" x2="100" y2="110" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+          <line x1="130" y1="100" x2="160" y2="110" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+          <line x1="100" y1="110" x2="55" y2="220" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+          <line x1="160" y1="110" x2="205" y2="220" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+          <line x1="100" y1="210" x2="130" y2="200" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+          <line x1="160" y1="210" x2="130" y2="200" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+          <line x1="100" y1="210" x2="100" y2="385" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+          <line x1="160" y1="210" x2="160" y2="385" stroke="rgba(56,189,248,0.08)" stroke-width="1"/>
+        </svg>
+
+        <!-- Neural Connection Lines overlay -->
+        <div class="neural-lines">
+          <svg viewBox="0 0 260 400">
+            <path class="neural-path" d="M0 50 Q60 30 130 45 Q200 60 260 40"/>
+            <path class="neural-path" d="M0 150 Q40 120 100 110 Q150 100 205 220 Q230 250 260 240"/>
+            <path class="neural-path" d="M0 250 Q60 280 130 200 Q200 160 260 300"/>
+            <path class="neural-path" d="M0 350 Q80 370 130 360 Q180 350 260 380"/>
+            <path class="neural-path" d="M130 45 Q110 130 55 220"/>
+            <path class="neural-path" d="M130 45 Q160 140 205 220"/>
+            <path class="neural-path" d="M55 220 Q80 290 100 385"/>
+            <path class="neural-path" d="M205 220 Q180 300 160 385"/>
+          </svg>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Stats Bar ===== -->
+  <div class="stats-bar reveal">
+    <div class="stat-item">
+      <div class="stat-number"><span class="count-up" data-target="60">0</span>+</div>
+      <div class="stat-label">标准化康复动作</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number"><span class="count-up" data-target="9">0</span>+</div>
+      <div class="stat-label">覆盖身体部位</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number"><span class="count-up" data-target="4">0</span> 周</div>
+      <div class="stat-label">完整康复方案周期</div>
+    </div>
+    <div class="stat-item">
+      <div class="stat-number"><span class="count-up" data-target="30">0</span>+</div>
+      <div class="stat-label">实时 FPS 姿态检测</div>
+    </div>
+  </div>
+
+  <!-- ===== Features ===== -->
+  <section class="features">
+    <div class="features-header reveal">
+      <h2>四大核心能力</h2>
+      <p>从评估到康复，AI 驱动的完整闭环</p>
+    </div>
+    <div class="feature-grid">
+      <div class="feature-card reveal reveal-delay-1">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/>
+          </svg>
+        </div>
+        <h3>AI 智能处方</h3>
+        <p>基于大模型与康复知识图谱，根据个体差异生成"一人一方"的专属康复方案</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-2">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polygon points="23 7 16 12 23 17 23 7"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/>
+          </svg>
+        </div>
+        <h3>实时姿态纠正</h3>
+        <p>摄像头实时捕捉动作，AI 关键点检测与角度分析，即时反馈纠错建议</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-3">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M3 3v18h18"/><path d="M7 16l4-8 4 4 4-6"/>
+          </svg>
+        </div>
+        <h3>进度可视化</h3>
+        <p>疼痛指数曲线、活动度改善趋势、训练完成率，让康复进展"看得见"</p>
+      </div>
+      <div class="feature-card reveal reveal-delay-4">
+        <div class="feature-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+          </svg>
+        </div>
+        <h3>智能动态调整</h3>
+        <p>基于用户执行反馈持续优化处方，异常预警与自动降阶，确保训练安全</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Tech Stack ===== -->
+  <div class="tech-strip reveal">
+    <span class="tech-strip-label">技术栈</span>
+    <div class="tech-strip-items">
+      <span class="tech-chip">FastAPI</span>
+      <span class="tech-chip">Python</span>
+      <span class="tech-chip">DeepSeek</span>
+      <span class="tech-chip">LLM</span>
+      <span class="tech-chip">MediaPipe</span>
+      <span class="tech-chip">RAG 知识库</span>
+      <span class="tech-chip">SQLite</span>
+      <span class="tech-chip">姿态估计</span>
+    </div>
+  </div>
+
+  <!-- ===== Footer ===== -->
+  <footer class="footer">
+    <div>© 2026 康健图谱 · 华科软件学院实训项目</div>
+    <div class="footer-team">
+      <span>王恒 <em>· 架构与后端</em></span>
+      <span>周硕 <em>· 算法与测试</em></span>
+      <span>刘经纬 <em>· 前端开发</em></span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+// ===== 1. Particle Background =====
+const canvas = document.getElementById('particleCanvas');
+const ctx = canvas.getContext('2d');
+let particles = [];
+let mouseX = 0, mouseY = 0;
+
+function resizeCanvas(){
+  canvas.width = window.innerWidth;
+  canvas.height = document.documentElement.scrollHeight;
+}
+resizeCanvas();
+window.addEventListener('resize',()=>{resizeCanvas();initParticles()});
+
+function initParticles(){
+  const count = Math.min(Math.floor(canvas.width * canvas.height / 6000), 120);
+  particles = [];
+  for(let i=0;i<count;i++){
+    particles.push({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      vx: (Math.random() - 0.5) * 0.3,
+      vy: (Math.random() - 0.5) * 0.3,
+      r: Math.random() * 2 + 0.5,
+      alpha: Math.random() * 0.3 + 0.1
+    });
+  }
+}
+initParticles();
+
+let particleRAF;
+function drawParticles(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  
+  particles.forEach((p,i)=>{
+    p.x += p.vx;
+    p.y += p.vy;
+    
+    if(p.x < 0) p.x = canvas.width;
+    if(p.x > canvas.width) p.x = 0;
+    if(p.y < 0) p.y = canvas.height;
+    if(p.y > canvas.height) p.y = 0;
+    
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(56,189,248,${p.alpha})`;
+    ctx.fill();
+
+    // Connection lines
+    for(let j=i+1;j<particles.length;j++){
+      const dx = p.x - particles[j].x;
+      const dy = p.y - particles[j].y;
+      const dist = dx * dx + dy * dy;
+      if(dist < 12000){
+        ctx.beginPath();
+        ctx.moveTo(p.x, p.y);
+        ctx.lineTo(particles[j].x, particles[j].y);
+        ctx.strokeStyle = `rgba(56,189,248,${0.05 * (1 - dist/12000)})`;
+        ctx.lineWidth = 0.5;
+        ctx.stroke();
+      }
+    }
+
+    // Mouse interaction
+    const mdx = p.x - mouseX;
+    const mdy = p.y - mouseY;
+    const mdist = mdx * mdx + mdy * mdy;
+    if(mdist < 15000){
+      const force = (1 - mdist/15000) * 0.3;
+      p.vx += mdx * force * 0.0005;
+      p.vy += mdy * force * 0.0005;
+      // Clamp velocity
+      const speed = Math.sqrt(p.vx*p.vx + p.vy*p.vy);
+      if(speed > 1.5){p.vx = (p.vx/speed)*1.5; p.vy = (p.vy/speed)*1.5}
+    }
+  });
+  
+  particleRAF = requestAnimationFrame(drawParticles);
+}
+drawParticles();
+
+document.addEventListener('mousemove',(e)=>{
+  mouseX = e.clientX;
+  mouseY = e.clientY + window.scrollY;
+});
+
+// ===== 2. Count-up Animation =====
+function animateCounters(){
+  document.querySelectorAll('.count-up').forEach(el=>{
+    const target = parseInt(el.dataset.target);
+    const duration = 1500;
+    const start = performance.now();
+    
+    function update(now){
+      const elapsed = now - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3); // ease-out cubic
+      el.textContent = Math.floor(eased * target);
+      if(progress < 1) requestAnimationFrame(update);
+    }
+    requestAnimationFrame(update);
+  });
+}
+
+// ===== 3. Scroll Reveal =====
+const revealObserver = new IntersectionObserver((entries)=>{
+  entries.forEach(entry=>{
+    if(entry.isIntersecting){
+      entry.target.classList.add('visible');
+      // Trigger count-up when stats bar becomes visible
+      if(entry.target.classList.contains('stats-bar')){
+        animateCounters();
+      }
+    }
+  });
+}, {threshold: 0.15});
+
+document.querySelectorAll('.reveal, .stats-bar').forEach(el=>revealObserver.observe(el));
+
+// ===== 4. Cleanup on page unload =====
+window.addEventListener('beforeunload',()=>{
+  if(particleRAF) cancelAnimationFrame(particleRAF);
+});
+</script>
+
+</body>
+</html>
