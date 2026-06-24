@@ -21,6 +21,7 @@ from .crud import (
     create_training_checkin,
     create_user,
     delete_patient_profile,
+    delete_imaging_report,
     delete_training_checkin,
     get_actions_by_prescription,
     get_imaging_report,
@@ -794,6 +795,19 @@ def read_imaging_report_api(
     if not report:
         raise HTTPException(status_code=404, detail="Imaging report not found")
     return imaging_report_response(report)
+
+
+@router.delete("/imaging_reports/{report_id}")
+def delete_imaging_report_api(
+    report_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    report = get_imaging_report(db, report_id=report_id, user_id=current_user.id)
+    if not report:
+        raise HTTPException(status_code=404, detail="Imaging report not found")
+    delete_imaging_report(db, report)
+    return {"message": "imaging report deleted"}
 
 
 @router.get("/training_checkins", response_model=list[TrainingCheckinResponse])

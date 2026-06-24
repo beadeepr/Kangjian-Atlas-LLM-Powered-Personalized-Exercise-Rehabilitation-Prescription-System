@@ -88,6 +88,38 @@ window.APP_CONFIG = {
   getUnsupportedPoseHint() {
     return "该动作暂不支持实时纠正，可先按处方说明与示范视频完成训练。";
   },
+  MOBILITY_GUIDES: {
+    颈部: {
+      icon: "🔄",
+      title: "颈部旋转测试",
+      instruction: "坐姿缓慢左右转头，观察是否出现疼痛、麻木或明显受限。",
+    },
+    肩部: {
+      icon: "🙆",
+      title: "扶墙滑臂测试",
+      instruction: "面对墙面，示指沿墙向上滑动，比较两侧抬臂高度与是否诱发肩痛。",
+    },
+    腰部: {
+      icon: "🧍",
+      title: "前屈触趾测试",
+      instruction: "站立缓慢前屈，评估腰部是否僵硬、疼痛或无法继续弯曲。",
+    },
+    膝关节: {
+      icon: "🦵",
+      title: "半蹲测试",
+      instruction: "扶椅背缓慢半蹲，观察膝部是否疼痛、弹响或无法完成。",
+    },
+    踝关节: {
+      icon: "👣",
+      title: "勾脚背屈测试",
+      instruction: "坐位勾脚背，比较两侧背屈幅度与跟腱/小腿是否牵拉痛。",
+    },
+  },
+  DEFAULT_MOBILITY_GUIDE: {
+    icon: "📋",
+    title: "日常活动自评",
+    instruction: "回忆近期弯腰、下蹲、转身、抬手等动作是否因疼痛明显受限。",
+  },
 };
 
 window.APP_CONFIG.isPoseSupported = function isPoseSupported(actionId) {

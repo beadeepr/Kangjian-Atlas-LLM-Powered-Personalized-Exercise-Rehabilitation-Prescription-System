@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>康健图谱 - 个性化运动康复处方</title>
-    <link rel="stylesheet" href="style.css?v=20260624b" />
+    <link rel="stylesheet" href="style.css?v=20260624g" />
   </head>
   <body>
     <header class="app-header">
@@ -24,7 +24,10 @@
         </div>
         <span class="mode-badge demo" id="mode-badge">Demo 模式</span>
         <button class="btn btn-secondary btn-small" id="toggle-demo" type="button">切换 API 模式</button>
-        <button class="btn btn-secondary btn-small dev-only" id="test-doubao" type="button">测试豆包</button>
+        <button class="btn btn-secondary btn-small" id="go-profiles" type="button" hidden>健康档案</button>
+        <button class="btn btn-secondary btn-small" id="go-library" type="button" hidden>动作库</button>
+        <button class="btn btn-secondary btn-small" id="go-progress" type="button" hidden>康复进度</button>
+        <button class="btn btn-secondary btn-small dev-only" id="test-doubao" type="button">测试 DeepSeek</button>
         <button class="btn btn-secondary btn-small" id="go-admin" type="button" hidden>管理后台</button>
         <button class="btn btn-secondary btn-small" id="logout-button" type="button" hidden>退出登录</button>
       </div>
@@ -50,10 +53,10 @@
     <main class="app-main">
       <section class="result-panel card" id="doubao-result-panel" hidden>
         <div class="result-panel-head">
-          <h2>豆包测试结果</h2>
+          <h2>DeepSeek 测试结果</h2>
           <button class="btn btn-secondary btn-small" id="clear-doubao-result" type="button">收起</button>
         </div>
-        <p class="hint">这里显示测试豆包接口返回的摘要内容，便于确认当前是否真的命中大模型。</p>
+        <p class="hint">这里显示测试 DeepSeek 接口返回的摘要内容，便于确认当前是否真的命中大模型。</p>
         <pre id="doubao-result" class="result-block"></pre>
       </section>
 
@@ -131,7 +134,7 @@
       <section id="page-intake" class="page" aria-labelledby="intake-title">
         <div class="page-head">
           <h2 id="intake-title">康复问诊</h2>
-          <p>请填写伤病信息与活动情况，系统将调用豆包大模型生成个性化康复处方。</p>
+          <p>请填写伤病信息与活动情况，系统将调用 DeepSeek 大模型生成个性化康复处方。</p>
         </div>
 
         <form id="intake-form" class="card form-grid" novalidate>
@@ -140,8 +143,11 @@
             <select id="patient-profile-select" name="patient_profile_id" aria-label="关联患者档案">
               <option value="">不关联患者档案（使用当前账号信息）</option>
             </select>
-            <span class="field-hint">可选：选择已有档案生成处方，或在下方填写后保存为新档案。</span>
-            <button class="btn btn-secondary btn-small" id="save-patient-profile" type="button">将当前问诊保存为新档案</button>
+            <span class="field-hint">可选：选择已有档案将自动填充伤病史与疼痛部位；也可在「健康档案」页完整维护。</span>
+            <div class="inline-actions">
+              <button class="btn btn-secondary btn-small" id="save-patient-profile" type="button">将当前问诊保存为新档案</button>
+              <button class="btn btn-secondary btn-small" id="open-profiles-from-intake" type="button">管理健康档案</button>
+            </div>
           </div>
 
           <div class="field field-full">
@@ -174,15 +180,62 @@
           </fieldset>
 
           <div class="field field-full">
-            <label for="mobility-score">
-              活动度自评
-              <span class="score-value" id="mobility-value">5</span>/10
-            </label>
-            <input id="mobility-score" name="mobility_score" type="range" min="1" max="10" value="5" />
-            <div class="range-labels">
-              <span>活动困难</span>
-              <span>活动自如</span>
-            </div>
+            <details class="intake-collapsible" id="mobility-collapsible">
+              <summary class="intake-collapsible-summary">
+                <span class="intake-collapsible-title">活动度自评</span>
+                <span class="intake-collapsible-meta" id="mobility-summary">5/10 · 中等活动度</span>
+              </summary>
+              <div class="intake-collapsible-body">
+                <label for="mobility-score">
+                  活动度评分
+                  <span class="score-value" id="mobility-value">5</span>/10
+                  <span class="mobility-tier" id="mobility-tier">中等活动度 · 常规方案</span>
+                </label>
+                <input id="mobility-score" name="mobility_score" type="range" min="1" max="10" value="5" />
+                <div class="range-labels">
+                  <span>活动困难</span>
+                  <span>活动自如</span>
+                </div>
+                <div class="mobility-guide card" id="mobility-guide">
+                  <h3 class="mobility-guide-title">活动度自测引导</h3>
+                  <p class="hint">根据所选疼痛部位，参考下方自测动作评估活动范围，再结合滑块打分。</p>
+                  <div class="mobility-guide-cards" id="mobility-guide-cards"></div>
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div class="field field-full intake-section-wrap" id="imaging-section-wrap">
+            <details class="intake-collapsible" id="imaging-collapsible">
+              <summary class="intake-collapsible-summary">
+                <span class="intake-collapsible-title">影像报告上传</span>
+                <span class="intake-collapsible-meta optional-tag">可选</span>
+              </summary>
+              <div class="intake-collapsible-body" id="imaging-section">
+                <p class="hint">支持上传文本报告（.txt/.md）自动提取内容；图片/PDF 将保存并标记待 OCR。系统会自动识别红旗症状。</p>
+                <div class="imaging-form-grid">
+                  <label>报告类型
+                    <select id="imaging-report-type" aria-label="报告类型">
+                      <option value="MRI">MRI</option>
+                      <option value="X光">X光</option>
+                      <option value="CT">CT</option>
+                      <option value="其他">其他</option>
+                    </select>
+                  </label>
+                  <label>上传文件
+                    <input id="imaging-file" type="file" accept=".txt,.md,.text/plain" />
+                  </label>
+                  <label class="imaging-text-label">或粘贴报告文本
+                    <textarea id="imaging-ocr-text" rows="3" placeholder="可直接粘贴影像报告关键结论…"></textarea>
+                  </label>
+                  <label>备注
+                    <input id="imaging-note" type="text" placeholder="可选" />
+                  </label>
+                </div>
+                <button class="btn btn-secondary btn-small" id="upload-imaging-report" type="button">上传并分析</button>
+                <div class="imaging-reports-list" id="imaging-reports-list"></div>
+              </div>
+            </details>
           </div>
 
           <div class="form-actions field-full">
@@ -239,6 +292,90 @@
         </div>
       </section>
 
+      <section id="page-profiles" class="page" aria-labelledby="profiles-title">
+        <div class="page-head">
+          <h2 id="profiles-title">健康档案管理</h2>
+          <p>维护伤病史、手术史、过敏史等完整档案，问诊时可一键关联。</p>
+        </div>
+        <div class="profiles-toolbar card">
+          <button class="btn btn-primary btn-small" id="profile-create-toggle" type="button">新建档案</button>
+          <button class="btn btn-secondary btn-small" id="refresh-profiles" type="button">刷新</button>
+        </div>
+        <div class="card profile-form-card" id="profile-form-card" hidden>
+          <h3 id="profile-form-title">新建健康档案</h3>
+          <form id="profile-form" class="form-grid profile-form-grid" novalidate>
+            <input type="hidden" id="profile-edit-id" value="" />
+            <div class="field"><label for="profile-name">姓名 <span class="required">*</span><input id="profile-name" required /></label></div>
+            <div class="field"><label for="profile-gender">性别<select id="profile-gender"><option value="">未填写</option><option value="男">男</option><option value="女">女</option><option value="其他">其他</option></select></label></div>
+            <div class="field"><label for="profile-age">年龄<input id="profile-age" type="number" min="1" max="120" /></label></div>
+            <div class="field"><label for="profile-phone">手机号<input id="profile-phone" type="tel" placeholder="可选" /></label></div>
+            <div class="field"><label for="profile-height">身高 (cm)<input id="profile-height" type="number" min="50" max="250" /></label></div>
+            <div class="field"><label for="profile-weight">体重 (kg)<input id="profile-weight" type="number" min="20" max="300" /></label></div>
+            <fieldset class="field field-full pain-field">
+              <legend>常见疼痛部位</legend>
+              <div class="chip-group" id="profile-pain-regions"></div>
+            </fieldset>
+            <div class="field field-full"><label for="profile-history">伤病史<textarea id="profile-history" rows="2"></textarea></label></div>
+            <div class="field field-full"><label for="profile-surgery">手术史<textarea id="profile-surgery" rows="2"></textarea></label></div>
+            <div class="field field-full"><label for="profile-allergy">过敏史<textarea id="profile-allergy" rows="2"></textarea></label></div>
+            <div class="field field-full"><label for="profile-goal">康复目标<textarea id="profile-goal" rows="2"></textarea></label></div>
+            <div class="field field-full"><label for="profile-note">备注<textarea id="profile-note" rows="2"></textarea></label></div>
+            <div class="form-actions field-full">
+              <button class="btn btn-primary" type="submit">保存档案</button>
+              <button class="btn btn-secondary" id="profile-form-cancel" type="button">取消</button>
+            </div>
+          </form>
+        </div>
+        <div id="profiles-list" class="profiles-list">正在加载…</div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-from-profiles" type="button">返回问诊</button>
+        </div>
+      </section>
+
+      <section id="page-library" class="page" aria-labelledby="library-title">
+        <div class="page-head">
+          <h2 id="library-title">康复动作库</h2>
+          <p>浏览标准康复动作：难度分级、分步要领与常见错误对比。</p>
+        </div>
+        <div class="library-toolbar card">
+          <label class="library-filter">关键词<input id="library-filter-q" type="search" placeholder="动作名称、部位…" /></label>
+          <label class="library-filter">部位<select id="library-filter-region"><option value="">全部部位</option></select></label>
+          <label class="library-filter">推荐难度<select id="library-filter-difficulty"><option value="">全部</option><option value="初级">初级</option><option value="中级">中级</option><option value="高级">高级</option></select></label>
+          <p class="hint library-filter-note">筛选的是动作推荐难度；演示页可查看初/中/高完整三档方案。</p>
+          <button class="btn btn-secondary btn-small" id="refresh-library" type="button">刷新</button>
+        </div>
+        <div id="library-grid" class="action-grid library-grid">正在加载…</div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-from-library" type="button">返回问诊</button>
+        </div>
+      </section>
+
+      <section id="page-progress" class="page" aria-labelledby="progress-title">
+        <div class="page-head">
+          <h2 id="progress-title">康复进度追踪</h2>
+          <p>查看疼痛变化趋势、训练完成率和 AI 周报。</p>
+        </div>
+        <div class="progress-stats-grid" id="progress-stats-grid"><p class="hint">正在加载…</p></div>
+        <div class="card progress-section">
+          <h3>疼痛变化趋势（VAS）</h3>
+          <div class="progress-chart" id="progress-vas-chart"><p class="hint">暂无数据</p></div>
+        </div>
+        <div class="card progress-section">
+          <h3>训练完成率</h3>
+          <div id="progress-completion"><p class="hint">暂无数据</p></div>
+        </div>
+        <div class="card progress-section">
+          <h3>AI 康复周报</h3>
+          <div id="progress-report"><p class="hint">暂无数据</p></div>
+          <div class="progress-report-actions" id="progress-report-actions" hidden>
+            <button class="btn btn-secondary btn-small" id="export-report-md" type="button">导出周报 MD</button>
+          </div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-from-progress" type="button">返回历史</button>
+        </div>
+      </section>
+
       <section id="page-demo" class="page" aria-labelledby="demo-title">
         <div class="page-head">
           <h2 id="demo-title">动作演示</h2>
@@ -246,28 +383,55 @@
         </div>
 
         <div class="demo-layout card">
-          <div class="demo-image-wrap">
-            <img id="demo-action-image" alt="" loading="lazy" onerror="handleActionImageError(this)" />
-            <span class="action-image-placeholder">示意图待上传</span>
+          <div class="demo-hero">
+            <div class="demo-image-wrap">
+              <img id="demo-action-image" alt="" loading="lazy" onerror="handleActionImageError(this)" />
+              <span class="action-image-placeholder">示意图待上传</span>
+            </div>
+            <div class="demo-meta" id="demo-meta"></div>
           </div>
 
           <div class="demo-content">
-            <div class="demo-meta" id="demo-meta"></div>
-
-            <div class="demo-section">
+            <section class="demo-section demo-section-primary">
               <h3 class="demo-section-title">动作说明</h3>
               <p id="demo-action-desc" class="demo-desc"></p>
-            </div>
+            </section>
 
-            <div class="demo-section" id="demo-contraindications-section" hidden>
-              <h3 class="demo-section-title">⚠️ 禁忌事项</h3>
+            <details class="demo-collapsible" id="demo-steps-collapsible" hidden>
+              <summary>分步要领</summary>
+              <ol id="demo-action-steps" class="demo-steps-list"></ol>
+            </details>
+
+            <details class="demo-collapsible" id="demo-mistakes-collapsible" hidden>
+              <summary>常见错误动作对比</summary>
+              <div id="demo-error-comparisons" class="error-comparison-list"></div>
+              <div class="mistake-compare-grid" id="demo-mistake-fallback" hidden>
+                <div class="mistake-card mistake-wrong">
+                  <h4>❌ 常见错误</h4>
+                  <ul id="demo-common-mistakes" class="demo-bullet-list"></ul>
+                </div>
+                <div class="mistake-card mistake-right">
+                  <h4>✅ 正确要点</h4>
+                  <ul id="demo-correct-cues" class="demo-bullet-list"></ul>
+                </div>
+              </div>
+            </details>
+
+            <details class="demo-collapsible" id="demo-difficulty-collapsible" hidden>
+              <summary>难度分级（初 / 中 / 高）</summary>
+              <p class="hint" id="demo-difficulty-current"></p>
+              <div id="demo-difficulty-profiles" class="difficulty-profile-grid"></div>
+            </details>
+
+            <details class="demo-collapsible" id="demo-contraindications-collapsible" hidden>
+              <summary>禁忌事项</summary>
               <p id="demo-contraindications" class="hint demo-desc"></p>
-            </div>
+            </details>
 
-            <div class="demo-section" id="demo-progression-section" hidden>
-              <h3 class="demo-section-title">进阶条件</h3>
+            <details class="demo-collapsible" id="demo-progression-collapsible" hidden>
+              <summary>进阶条件</summary>
               <p id="demo-progression" class="hint demo-desc"></p>
-            </div>
+            </details>
 
             <div class="demo-guidance">
               <p class="demo-guidance-text">请仔细查看示意图和动作说明，确认自己没有禁忌事项后再进入跟练。建议在宽敞、光线充足的空间进行，穿着宽松舒适的衣物。</p>
@@ -335,6 +499,30 @@
                 <input id="checkin-note" type="text" placeholder="例如：膝部酸胀减轻" />
               </label>
             </div>
+            <div class="training-side-card" id="training-counter-card">
+              <h3 class="training-side-title">训练计数</h3>
+              <div class="counter-grid">
+                <div class="counter-item"><span class="counter-value" id="counter-duration">0:00</span><span class="counter-label">时长</span></div>
+                <div class="counter-item"><span class="counter-value" id="counter-reps">0</span><span class="counter-label">次数</span></div>
+                <div class="counter-item"><span class="counter-value" id="counter-sets">0</span><span class="counter-label">组数</span></div>
+              </div>
+            </div>
+            <div class="training-side-card" id="training-voice-card">
+              <h3 class="training-side-title">语音纠错</h3>
+              <div class="voice-status">
+                <span class="voice-indicator" id="voice-indicator"></span>
+                <span id="voice-cue-text">等待开始…</span>
+              </div>
+              <button class="btn btn-secondary btn-small" id="toggle-voice" type="button">开启语音播报</button>
+            </div>
+            <div class="training-side-card" id="training-fatigue-card" hidden>
+              <h3 class="training-side-title">疲劳监测</h3>
+              <div class="fatigue-panel" id="fatigue-panel">
+                <div class="fatigue-score-wrap"><span class="fatigue-score" id="fatigue-score">—</span><span class="fatigue-label" id="fatigue-level">未检测</span></div>
+                <p class="hint" id="fatigue-recommendation">连接穿戴设备后可监测疲劳度。</p>
+                <ul class="fatigue-signals" id="fatigue-signals"></ul>
+              </div>
+            </div>
             <div class="training-actions">
               <button class="btn btn-primary btn-block" id="start-camera" type="button">启动摄像头</button>
               <button class="btn btn-secondary btn-block" id="stop-training" type="button">返回处方</button>
@@ -373,10 +561,20 @@
       </div>
     </div>
 
+    <div class="red-flag-overlay" id="red-flag-overlay" hidden aria-hidden="true">
+      <div class="red-flag-modal" role="alertdialog" aria-labelledby="red-flag-modal-title" aria-modal="true">
+        <div class="red-flag-modal-icon" aria-hidden="true">⚠️</div>
+        <h2 class="red-flag-modal-title" id="red-flag-modal-title">红色预警：建议立即就医</h2>
+        <div id="red-flag-message" class="red-flag-message"></div>
+        <ul id="red-flag-list" class="red-flag-list"></ul>
+        <button class="btn btn-primary red-flag-dismiss" id="red-flag-dismiss" type="button">我知道了</button>
+      </div>
+    </div>
+
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="config.js?v=20260624b"></script>
-    <script src="mock.js?v=20260624b"></script>
-    <script type="module" src="app.js?v=20260624b"></script>
+    <script src="config.js?v=20260624g"></script>
+    <script src="mock.js?v=20260624g"></script>
+    <script type="module" src="app.js?v=20260624g"></script>
   </body>
 </html>

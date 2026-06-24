@@ -16,6 +16,17 @@ const state = {
   authTab: "login",
   selectedPatientProfileId: null,
   patientProfiles: [],
+  profileFormRegions: new Set(),
+  profileReturnStep: "intake",
+  actionLibrary: [],
+  libraryFilters: { q: "", bodyRegion: "", difficulty: "" },
+  imagingReports: [],
+  voiceEnabled: false,
+  trainingStartTime: null,
+  trainingTimer: null,
+  trainingRepCount: 0,
+  trainingSetCount: 0,
+  lastRepStatus: null,
   trainingLastScore: null,
   adminEditingId: null,
   adminFilters: { q: "", bodyRegion: "" },
@@ -87,8 +98,30 @@ const els = {
   checkinPainAfter: document.getElementById("checkin-pain-after"),
   checkinNote: document.getElementById("checkin-note"),
   adminEntryButton: document.getElementById("go-admin"),
+  profilesEntryButton: document.getElementById("go-profiles"),
+  libraryEntryButton: document.getElementById("go-library"),
   adminActionsPanel: document.getElementById("admin-actions-panel"),
   adminQuickNav: document.getElementById("admin-quick-nav"),
+  mobilityTier: document.getElementById("mobility-tier"),
+  mobilityGuideCards: document.getElementById("mobility-guide-cards"),
+  redFlagOverlay: document.getElementById("red-flag-overlay"),
+  redFlagMessage: document.getElementById("red-flag-message"),
+  redFlagList: document.getElementById("red-flag-list"),
+  mobilitySummary: document.getElementById("mobility-summary"),
+  imagingSectionWrap: document.getElementById("imaging-section-wrap"),
+  imagingSection: document.getElementById("imaging-section"),
+  imagingReportsList: document.getElementById("imaging-reports-list"),
+  profilesList: document.getElementById("profiles-list"),
+  profileFormCard: document.getElementById("profile-form-card"),
+  profileForm: document.getElementById("profile-form"),
+  profilePainRegions: document.getElementById("profile-pain-regions"),
+  libraryGrid: document.getElementById("library-grid"),
+  goProgressButton: document.getElementById("go-progress"),
+  progressStatsGrid: document.getElementById("progress-stats-grid"),
+  progressVasChart: document.getElementById("progress-vas-chart"),
+  progressCompletion: document.getElementById("progress-completion"),
+  progressReport: document.getElementById("progress-report"),
+  progressReportActions: document.getElementById("progress-report-actions"),
 };
 
 function readStoredAuth() {
@@ -347,7 +380,7 @@ function startPrescriptionLoading() {
     : [
         { text: "正在验证问诊信息…", progress: 12 },
         { text: "正在匹配康复动作…", progress: 28 },
-        { text: "正在调用豆包大模型…", progress: 48 },
+        { text: "正在调用 DeepSeek 大模型…", progress: 48 },
         { text: "正在生成处方摘要…", progress: 68 },
         { text: "正在整理处方内容…", progress: 86 },
       ];
@@ -408,8 +441,20 @@ function goToStep(step) {
   if (step === "admin") {
     loadAdminActions();
   }
+  if (step === "profiles") {
+    loadProfilesPage();
+  }
+  if (step === "library") {
+    loadActionLibrary();
+  }
+  if (step === "progress") {
+    loadProgressPage();
+  }
   if (step === "intake") {
     loadPatientProfiles();
+    loadImagingReports();
+    updateMobilityGuide();
+    hideRedFlagAlert();
     if (els.patientProfileSelect?.closest(".field")) {
       els.patientProfileSelect.closest(".field").hidden = window.APP_CONFIG.DEMO_MODE;
     }
@@ -554,16 +599,52 @@ function validateForm(formData) {
   els.painRegionsError.textContent = painRegionError || "";
   els.symptomsError.textContent = symptomError || "";
 
-  return !painRegionError && !symptomError;
+  if (painRegionError) {
+    focusIntakeField(document.querySelector(".pain-field") || els.painRegions);
+    return false;
+  }
+  if (symptomError) {
+    focusIntakeField(document.getElementById("symptoms"));
+    return false;
+  }
+  return true;
+}
+
+function focusIntakeField(element) {
+  if (!element) return;
+  const collapsible = element.closest("details.intake-collapsible");
+  if (collapsible && !collapsible.open) collapsible.open = true;
+  window.requestAnimationFrame(() => {
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    const focusTarget =
+      element.matches("textarea, input, select, button")
+        ? element
+        : element.querySelector("textarea, input, select, button");
+    focusTarget?.focus({ preventScroll: true });
+  });
 }
 
 async function parseApiError(response) {
   const raw = await response.text();
   try {
     const data = JSON.parse(raw);
-    return data.detail || raw;
+    const detail = data.detail;
+    if (typeof detail === "object" && detail !== null) {
+      return detail.message || detail.msg || JSON.stringify(detail);
+    }
+    return detail || raw;
   } catch {
     return raw || `HTTP ${response.status}`;
+  }
+}
+
+async function parseApiErrorDetail(response) {
+  const raw = await response.text();
+  try {
+    const data = JSON.parse(raw);
+    return data.detail ?? raw;
+  } catch {
+    return raw;
   }
 }
 
@@ -669,6 +750,7 @@ function hideDoubaoResult() {
 }
 
 function updateAdminEntry() {
+  const loggedIn = isSessionReady() && !window.APP_CONFIG.DEMO_MODE;
   const isAdmin = state.currentUser?.role === "admin";
   if (els.adminEntryButton) {
     els.adminEntryButton.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
@@ -676,6 +758,866 @@ function updateAdminEntry() {
   if (els.adminQuickNav) {
     els.adminQuickNav.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
   }
+  if (els.profilesEntryButton) {
+    els.profilesEntryButton.hidden = !loggedIn;
+  }
+  if (els.libraryEntryButton) {
+    els.libraryEntryButton.hidden = !loggedIn;
+  }
+  if (els.goProgressButton) {
+    els.goProgressButton.hidden = !loggedIn;
+  }
+  if (els.imagingSectionWrap) {
+    els.imagingSectionWrap.hidden = window.APP_CONFIG.DEMO_MODE;
+  }
+}
+
+function hideRedFlagAlert() {
+  if (els.redFlagOverlay) {
+    els.redFlagOverlay.hidden = true;
+    els.redFlagOverlay.setAttribute("aria-hidden", "true");
+  }
+  if (els.redFlagMessage) els.redFlagMessage.innerHTML = "";
+  if (els.redFlagList) {
+    els.redFlagList.innerHTML = "";
+    els.redFlagList.hidden = true;
+  }
+}
+
+function formatRedFlagMessageHtml(message, redFlags = []) {
+  const labels =
+    redFlags.map((item) => item.label).filter(Boolean).join("、") ||
+    (message.match(/检测到红旗症状：([^。]+)/)?.[1] ?? "需立即就医的相关症状");
+  const rest = message.replace(/检测到红旗症状：[^。]+。?/, "").trim();
+  const urgentMatch = rest.match(/(请尽快.+)$/);
+  const urgentText = urgentMatch?.[1]?.trim() || "请尽快前往医院或咨询专业医生/康复治疗师。";
+  const bodyText = (urgentMatch ? rest.slice(0, urgentMatch.index) : rest)
+    .replace(/[，,]\s*$/, "")
+    .trim() || "为避免延误病情，系统已暂停生成普通居家康复训练处方";
+
+  return `
+    <p class="red-flag-lead">检测到红旗症状：</p>
+    <p class="red-flag-highlight">${escapeAdminText(labels)}</p>
+    <p class="red-flag-body">${escapeAdminText(bodyText)}</p>
+    <p class="red-flag-urgent">${escapeAdminText(urgentText)}</p>
+  `;
+}
+
+function showRedFlagAlert(message, redFlags = []) {
+  if (!els.redFlagOverlay) return;
+  els.redFlagOverlay.hidden = false;
+  els.redFlagOverlay.setAttribute("aria-hidden", "false");
+  if (els.redFlagMessage) {
+    els.redFlagMessage.innerHTML = formatRedFlagMessageHtml(message || "", redFlags);
+  }
+  if (els.redFlagList) {
+    const extraFlags = (redFlags || []).filter(
+      (item) => !message?.includes(item.label || "")
+    );
+    if (extraFlags.length) {
+      els.redFlagList.hidden = false;
+      els.redFlagList.innerHTML = extraFlags
+        .map((item) => `<li>${escapeAdminText(item.label || item.code || "未知风险")}</li>`)
+        .join("");
+    } else {
+      els.redFlagList.innerHTML = "";
+      els.redFlagList.hidden = true;
+    }
+  }
+}
+
+function updateMobilitySummary(score) {
+  const tier = getMobilityTier(score);
+  const shortLabel = tier.label.split(" · ")[0] || tier.label;
+  if (els.mobilitySummary) {
+    els.mobilitySummary.textContent = `${score}/10 · ${shortLabel}`;
+  }
+}
+
+function updateMobilityGuide() {
+  if (!els.mobilityGuideCards) return;
+  const regions = Array.from(state.selectedPainRegions);
+  const guides = regions.length
+    ? regions.map((region) => ({
+        region,
+        ...(window.APP_CONFIG.MOBILITY_GUIDES[region] || window.APP_CONFIG.DEFAULT_MOBILITY_GUIDE),
+      }))
+    : [{ region: "通用", ...window.APP_CONFIG.DEFAULT_MOBILITY_GUIDE }];
+
+  els.mobilityGuideCards.innerHTML = guides
+    .map(
+      (guide) => `
+      <article class="mobility-guide-card">
+        <div class="guide-icon">${escapeAdminText(guide.icon || "📋")}</div>
+        <h4>${escapeAdminText(guide.title)}${guide.region && guide.region !== "通用" ? ` · ${escapeAdminText(guide.region)}` : ""}</h4>
+        <p>${escapeAdminText(guide.instruction)}</p>
+      </article>`
+    )
+    .join("");
+}
+
+function updateMobilityTierDisplay(score) {
+  const tier = getMobilityTier(score);
+  if (els.mobilityTier) els.mobilityTier.textContent = tier.label;
+  updateMobilitySummary(score);
+}
+
+function applyPatientProfileToIntake(profile) {
+  if (!profile) return;
+  const historyField = document.getElementById("history");
+  if (historyField && profile.history) historyField.value = profile.history;
+  state.selectedPainRegions.clear();
+  (profile.pain_regions || []).forEach((region) => state.selectedPainRegions.add(region));
+  els.painRegions?.querySelectorAll(".chip").forEach((chip) => {
+    chip.classList.toggle("selected", state.selectedPainRegions.has(chip.textContent));
+  });
+  updateMobilityGuide();
+}
+
+function readProfileFormPayload() {
+  return {
+    name: document.getElementById("profile-name")?.value.trim() || "",
+    gender: document.getElementById("profile-gender")?.value || null,
+    age: document.getElementById("profile-age")?.value ? Number(document.getElementById("profile-age").value) : null,
+    phone: document.getElementById("profile-phone")?.value.trim() || null,
+    height_cm: document.getElementById("profile-height")?.value ? Number(document.getElementById("profile-height").value) : null,
+    weight_kg: document.getElementById("profile-weight")?.value ? Number(document.getElementById("profile-weight").value) : null,
+    pain_regions: Array.from(state.profileFormRegions),
+    history: document.getElementById("profile-history")?.value.trim() || null,
+    surgery_history: document.getElementById("profile-surgery")?.value.trim() || null,
+    allergy_history: document.getElementById("profile-allergy")?.value.trim() || null,
+    rehab_goal: document.getElementById("profile-goal")?.value.trim() || null,
+    note: document.getElementById("profile-note")?.value.trim() || null,
+  };
+}
+
+function resetProfileForm() {
+  state.profileFormRegions.clear();
+  document.getElementById("profile-edit-id").value = "";
+  document.getElementById("profile-form-title").textContent = "新建健康档案";
+  els.profileForm?.reset();
+  els.profilePainRegions?.querySelectorAll(".chip").forEach((chip) => chip.classList.remove("selected"));
+  if (els.profileFormCard) els.profileFormCard.hidden = true;
+}
+
+function fillProfileForm(profile) {
+  document.getElementById("profile-edit-id").value = profile.id;
+  document.getElementById("profile-form-title").textContent = `编辑档案：${profile.name}`;
+  document.getElementById("profile-name").value = profile.name || "";
+  document.getElementById("profile-gender").value = profile.gender || "";
+  document.getElementById("profile-age").value = profile.age ?? "";
+  document.getElementById("profile-phone").value = profile.phone || "";
+  document.getElementById("profile-height").value = profile.height_cm ?? "";
+  document.getElementById("profile-weight").value = profile.weight_kg ?? "";
+  document.getElementById("profile-history").value = profile.history || "";
+  document.getElementById("profile-surgery").value = profile.surgery_history || "";
+  document.getElementById("profile-allergy").value = profile.allergy_history || "";
+  document.getElementById("profile-goal").value = profile.rehab_goal || "";
+  document.getElementById("profile-note").value = profile.note || "";
+  state.profileFormRegions = new Set(profile.pain_regions || []);
+  els.profilePainRegions?.querySelectorAll(".chip").forEach((chip) => {
+    chip.classList.toggle("selected", state.profileFormRegions.has(chip.textContent));
+  });
+  if (els.profileFormCard) els.profileFormCard.hidden = false;
+}
+
+function renderProfileCard(profile) {
+  const regions = (profile.pain_regions || []).join("、") || "未填写";
+  return `
+    <article class="profile-card" data-profile-id="${profile.id}">
+      <div class="profile-card-head">
+        <div>
+          <h3>${escapeAdminText(profile.name)}${profile.age ? ` · ${profile.age}岁` : ""}</h3>
+          <p class="hint">${escapeAdminText(profile.gender || "性别未填")}${profile.phone ? ` · ${escapeAdminText(profile.phone)}` : ""}</p>
+        </div>
+        <div class="profile-card-actions">
+          <button class="btn btn-secondary btn-small profile-use-btn" type="button" data-profile-id="${profile.id}">用于问诊</button>
+          <button class="btn btn-secondary btn-small profile-edit-btn" type="button" data-profile-id="${profile.id}">编辑</button>
+          <button class="btn btn-secondary btn-small profile-delete-btn" type="button" data-profile-id="${profile.id}">删除</button>
+        </div>
+      </div>
+      <div class="profile-meta-grid">
+        <span>疼痛部位：${escapeAdminText(regions)}</span>
+        <span>伤病史：${escapeAdminText(profile.history || "无")}</span>
+        <span>手术史：${escapeAdminText(profile.surgery_history || "无")}</span>
+        <span>过敏史：${escapeAdminText(profile.allergy_history || "无")}</span>
+      </div>
+      ${profile.rehab_goal ? `<p class="hint" style="margin-top:8px">康复目标：${escapeAdminText(profile.rehab_goal)}</p>` : ""}
+    </article>`;
+}
+
+async function loadProfilesPage() {
+  if (!els.profilesList) return;
+  if (!requireLogin() || window.APP_CONFIG.DEMO_MODE) {
+    els.profilesList.innerHTML = "<p class=\"hint\">请先登录并切换到 API 模式。</p>";
+    return;
+  }
+  els.profilesList.innerHTML = "<p class=\"hint\">正在加载…</p>";
+  await loadPatientProfiles();
+  if (!state.patientProfiles.length) {
+    els.profilesList.innerHTML = "<p class=\"hint\">暂无健康档案，可点击「新建档案」添加。</p>";
+    return;
+  }
+  els.profilesList.innerHTML = state.patientProfiles.map(renderProfileCard).join("");
+}
+
+async function saveProfileForm(event) {
+  event.preventDefault();
+  if (!requireLogin()) return;
+  const payload = readProfileFormPayload();
+  if (!payload.name) {
+    showToast("请填写姓名");
+    return;
+  }
+  const editId = document.getElementById("profile-edit-id")?.value;
+  const url = editId
+    ? `${window.APP_CONFIG.API_BASE}/patient_profiles/${editId}`
+    : `${window.APP_CONFIG.API_BASE}/patient_profiles`;
+  const response = await fetchWithTimeout(url, {
+    method: editId ? "PUT" : "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    showToast("档案保存失败");
+    return;
+  }
+  const profile = await response.json();
+  showToast(editId ? "档案已更新" : "档案已创建");
+  resetProfileForm();
+  await loadPatientProfiles();
+  await loadProfilesPage();
+  if (!editId) {
+    state.selectedPatientProfileId = profile.id;
+    renderPatientProfileSelect();
+  }
+}
+
+async function deleteProfile(profileId) {
+  if (!window.confirm("确定删除该健康档案？")) return;
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/patient_profiles/${profileId}`,
+    { method: "DELETE", headers: authHeaders() }
+  );
+  if (!response.ok) {
+    showToast("删除失败");
+    return;
+  }
+  if (state.selectedPatientProfileId === profileId) state.selectedPatientProfileId = null;
+  showToast("档案已删除");
+  await loadPatientProfiles();
+  await loadProfilesPage();
+}
+
+function renderImagingReportCard(report) {
+  const riskClass = report.risk_level === "high" ? "risk-high" : "";
+  const ocrText = report.ocr_text || "";
+  const uniqueFlags = (report.red_flags || []).filter((item, index, list) => {
+    const label = item.label || "";
+    if (!label) return false;
+    if (ocrText.includes(label)) return false;
+    return list.findIndex((other) => other.label === label) === index;
+  });
+  const flags = uniqueFlags
+    .map((item) => `<li>${escapeAdminText(item.label || item.code)}</li>`)
+    .join("");
+  const createdAt = report.created_at
+    ? escapeAdminText(String(report.created_at).slice(0, 19).replace("T", " "))
+    : "";
+  return `
+    <article class="imaging-report-card ${riskClass}" data-report-id="${report.id}">
+      <div class="imaging-report-head">
+        <div>
+          <strong>${escapeAdminText(report.report_type || "影像报告")}</strong>
+          ${report.file_name ? ` · ${escapeAdminText(report.file_name)}` : ""}
+          ${createdAt ? `<span class="hint"> · ${createdAt}</span>` : ""}
+        </div>
+        <button class="btn btn-secondary btn-small imaging-delete-btn" type="button" data-report-id="${report.id}">删除</button>
+      </div>
+      <p class="hint">OCR：${escapeAdminText(report.ocr_status)} · 风险：${escapeAdminText(report.risk_level)}</p>
+      ${ocrText ? `<p class="imaging-ocr-text">${escapeAdminText(ocrText.slice(0, 220))}${ocrText.length > 220 ? "…" : ""}</p>` : ""}
+      ${flags ? `<ul class="red-flag-list imaging-flag-list">${flags}</ul>` : ""}
+    </article>`;
+}
+
+async function deleteImagingReport(reportId) {
+  if (!requireLogin() || window.APP_CONFIG.DEMO_MODE) return;
+  if (!window.confirm("确定删除该影像报告记录？")) return;
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/imaging_reports/${reportId}`,
+    { method: "DELETE", headers: authHeaders() }
+  );
+  if (!response.ok) {
+    showToast("删除失败");
+    return;
+  }
+  showToast("影像报告已删除");
+  await loadImagingReports();
+}
+
+function bindImagingReportEvents() {
+  if (els.imagingReportsList?.dataset.bound === "true") return;
+  if (els.imagingReportsList) els.imagingReportsList.dataset.bound = "true";
+  els.imagingReportsList?.addEventListener("click", async (event) => {
+    const button = event.target.closest(".imaging-delete-btn");
+    if (!button) return;
+    await deleteImagingReport(Number(button.dataset.reportId));
+  });
+}
+
+async function loadImagingReports() {
+  if (!els.imagingReportsList || !isSessionReady() || window.APP_CONFIG.DEMO_MODE) return;
+  try {
+    const params = state.selectedPatientProfileId
+      ? `?patient_profile_id=${state.selectedPatientProfileId}`
+      : "";
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/imaging_reports${params}`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) return;
+    const reports = await response.json();
+    const seen = new Set();
+    state.imagingReports = reports.filter((report) => {
+      if (seen.has(report.id)) return false;
+      seen.add(report.id);
+      return true;
+    });
+    if (!state.imagingReports.length) {
+      els.imagingReportsList.innerHTML = "<p class=\"hint\">暂无影像报告记录。</p>";
+      return;
+    }
+    els.imagingReportsList.innerHTML = state.imagingReports.map(renderImagingReportCard).join("");
+  } catch {
+    els.imagingReportsList.innerHTML = "<p class=\"hint\">影像报告加载失败。</p>";
+  }
+}
+
+async function uploadImagingReport() {
+  if (!requireLogin() || window.APP_CONFIG.DEMO_MODE) return;
+  const fileInput = document.getElementById("imaging-file");
+  const ocrText = document.getElementById("imaging-ocr-text")?.value.trim();
+  const note = document.getElementById("imaging-note")?.value.trim();
+  const reportType = document.getElementById("imaging-report-type")?.value || "影像报告";
+  const file = fileInput?.files?.[0];
+
+  if (!file && !ocrText) {
+    showToast("请上传文本报告或粘贴报告内容");
+    return;
+  }
+
+  const payload = {
+    patient_profile_id: state.selectedPatientProfileId,
+    report_type: reportType,
+    note: note || null,
+    ocr_text: ocrText || null,
+  };
+
+  if (file) {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    payload.file_name = file.name;
+    payload.file_content_base64 = btoa(binary);
+    if (!ocrText && /\.(txt|md)$/i.test(file.name)) {
+      payload.ocr_text = await file.text();
+    }
+  }
+
+  setLoading(true, "正在上传并分析影像报告…");
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/imaging_reports`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const detail = await parseApiError(response);
+      showToast(detail || "上传失败");
+      return;
+    }
+    const report = await response.json();
+    if (report.red_flags?.length) {
+      showRedFlagAlert("影像报告检测到红旗症状，建议尽快就医评估。", report.red_flags);
+    }
+    showToast("影像报告已上传");
+    if (fileInput) fileInput.value = "";
+    document.getElementById("imaging-ocr-text").value = "";
+    document.getElementById("imaging-note").value = "";
+    await loadImagingReports();
+  } catch {
+    showToast("影像报告上传失败");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderActionMetaTags(action) {
+  const parts = [];
+  if (action.sets) parts.push(`${action.sets} 组`);
+  if (action.reps) parts.push(`${action.reps} 次/组`);
+  if (action.frequency) parts.push(action.frequency);
+  if (action.difficulty_level) {
+    let cls = "tag-difficulty";
+    if (action.difficulty_level === "中级") cls += " mid";
+    if (action.difficulty_level === "高级") cls += " advanced";
+    parts.push(`<span class="tag ${cls}">${escapeAdminText(action.difficulty_level)}</span>`);
+  }
+  if (action.category) parts.push(`<span class="tag">${escapeAdminText(action.category)}</span>`);
+  return parts.map((p) => (p.startsWith("<span") ? p : `<span class="tag">${escapeAdminText(p)}</span>`)).join("");
+}
+
+function setDemoCollapsible(id, visible, summaryText) {
+  const details = document.getElementById(id);
+  if (!details) return;
+  details.hidden = !visible;
+  if (!visible) {
+    details.open = false;
+    return;
+  }
+  const summary = details.querySelector("summary");
+  if (summary && summaryText) summary.textContent = summaryText;
+}
+
+function renderActionDetailSections(action) {
+  const stepsEl = document.getElementById("demo-action-steps");
+  const comparisonsEl = document.getElementById("demo-error-comparisons");
+  const fallbackEl = document.getElementById("demo-mistake-fallback");
+  const mistakesEl = document.getElementById("demo-common-mistakes");
+  const cuesEl = document.getElementById("demo-correct-cues");
+  const difficultyCurrent = document.getElementById("demo-difficulty-current");
+  const difficultyProfilesEl = document.getElementById("demo-difficulty-profiles");
+
+  const steps = action.steps || [];
+  setDemoCollapsible("demo-steps-collapsible", steps.length > 0, `分步要领（${steps.length} 步）`);
+  if (stepsEl) stepsEl.innerHTML = steps.map((step) => `<li>${escapeAdminText(step)}</li>`).join("");
+
+  const comparisons = action.error_comparisons || [];
+  if (comparisonsEl && fallbackEl) {
+    if (comparisons.length) {
+      comparisonsEl.hidden = false;
+      fallbackEl.hidden = true;
+      comparisonsEl.innerHTML = comparisons
+        .map(
+          (item) => `
+        <article class="error-comparison-card">
+          <div class="error-comparison-row mistake-wrong">
+            <span class="error-comparison-label">❌ 常见错误</span>
+            <p>${escapeAdminText(item.mistake || "")}</p>
+          </div>
+          <div class="error-comparison-row mistake-right">
+            <span class="error-comparison-label">✅ 正确要点</span>
+            <p>${escapeAdminText(item.correct || "")}</p>
+          </div>
+          ${item.risk ? `<p class="hint error-comparison-risk">风险：${escapeAdminText(item.risk)}</p>` : ""}
+        </article>`
+        )
+        .join("");
+      setDemoCollapsible(
+        "demo-mistakes-collapsible",
+        true,
+        `常见错误动作对比（${comparisons.length} 项）`
+      );
+    } else {
+      comparisonsEl.innerHTML = "";
+      comparisonsEl.hidden = true;
+      const mistakes = action.common_mistakes || [];
+      const cues = action.correct_cues || [];
+      fallbackEl.hidden = !mistakes.length && !cues.length;
+      if (mistakesEl) mistakesEl.innerHTML = mistakes.map((item) => `<li>${escapeAdminText(item)}</li>`).join("");
+      if (cuesEl) cuesEl.innerHTML = cues.map((item) => `<li>${escapeAdminText(item)}</li>`).join("");
+      setDemoCollapsible(
+        "demo-mistakes-collapsible",
+        mistakes.length > 0 || cues.length > 0,
+        "常见错误 vs 正确要点"
+      );
+    }
+  }
+
+  const profiles = action.difficulty_profiles || [];
+  setDemoCollapsible("demo-difficulty-collapsible", profiles.length > 0, "难度分级（初 / 中 / 高）");
+  if (difficultyProfilesEl) {
+    if (difficultyCurrent) {
+      difficultyCurrent.textContent = action.difficulty_level
+        ? `当前推荐难度：${action.difficulty_level}（下方三档为可执行的初/中/高训练方案）`
+        : "以下为初、中、高三个难度档位的训练参数参考。";
+    }
+    difficultyProfilesEl.innerHTML = profiles
+      .map((profile) => {
+        const active = profile.level === action.difficulty_level ? " is-current" : "";
+        const levelClass =
+          profile.level === "中级" ? " mid" : profile.level === "高级" ? " advanced" : "";
+        return `
+        <article class="difficulty-profile-card${active}">
+          <h4><span class="tag tag-difficulty${levelClass}">${escapeAdminText(profile.level || "难度")}</span>${active ? " · 推荐" : ""}</h4>
+          <p><strong>${profile.sets ?? "-"}</strong> 组 × <strong>${profile.reps ?? "-"}</strong> 次</p>
+          ${profile.tempo ? `<p class="hint">${escapeAdminText(profile.tempo)}</p>` : ""}
+          ${profile.guidance ? `<p>${escapeAdminText(profile.guidance)}</p>` : ""}
+        </article>`;
+      })
+      .join("");
+  }
+
+  setDemoCollapsible(
+    "demo-contraindications-collapsible",
+    Boolean(action.contraindications),
+    "禁忌事项"
+  );
+  setDemoCollapsible(
+    "demo-progression-collapsible",
+    Boolean(action.progression),
+    "进阶条件"
+  );
+}
+
+async function fetchActionDetail(action) {
+  const actionId = action?.id || action?.backendId;
+  if (!actionId || window.APP_CONFIG.DEMO_MODE) {
+    return window.MockService.enrichAction(action);
+  }
+  try {
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/actions/${encodeURIComponent(actionId)}`
+    );
+    if (!response.ok) return window.MockService.enrichAction(action);
+    return window.MockService.enrichAction(await response.json());
+  } catch {
+    return window.MockService.enrichAction(action);
+  }
+}
+
+function filterActionLibrary(actions) {
+  const { q, bodyRegion, difficulty } = state.libraryFilters;
+  return actions.filter((action) => {
+    if (bodyRegion && !(action.body_regions || []).includes(bodyRegion)) return false;
+    if (difficulty && action.difficulty_level !== difficulty) return false;
+    if (q) {
+      const haystack = [
+        action.name,
+        action.id,
+        action.description,
+        ...(action.body_regions || []),
+        ...(action.target_conditions || []),
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(q.toLowerCase())) return false;
+    }
+    return true;
+  });
+}
+
+function renderLibraryActionCard(action) {
+  const poseSupported = window.APP_CONFIG.isPoseSupported(action.id);
+  return `
+    <article class="action-card card">
+      <div class="action-image-wrap">
+        <img src="${window.APP_CONFIG.assetUrl(action.image)}" alt="${escapeAdminText(action.name)}示意图" loading="lazy" onerror="handleActionImageError(this)" />
+        <span class="action-image-placeholder">示意图待上传</span>
+      </div>
+      <div class="action-card-body">
+        <h3>${escapeAdminText(action.name)}</h3>
+        <div class="action-meta">${renderActionMetaTags(action)}</div>
+        <p>${escapeAdminText(action.description || "")}</p>
+        <p class="hint">${escapeAdminText((action.body_regions || []).join("、"))}${action.stage ? ` · ${escapeAdminText(action.stage)}` : ""}</p>
+        <button class="btn btn-primary btn-small library-view-demo" type="button" data-action-id="${escapeAdminText(action.id || "")}">
+          查看详情${poseSupported ? " / 跟练" : ""}
+        </button>
+      </div>
+    </article>`;
+}
+
+async function loadActionLibrary() {
+  if (!els.libraryGrid) return;
+  els.libraryGrid.innerHTML = "<p class=\"hint\">正在加载动作库…</p>";
+  try {
+    if (window.APP_CONFIG.DEMO_MODE) {
+      state.actionLibrary = Object.values(window.ACTION_CATALOG).map((item) =>
+        window.MockService.enrichAction(item)
+      );
+    } else {
+      const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/actions`);
+      if (!response.ok) throw new Error("actions unavailable");
+      const data = await response.json();
+      state.actionLibrary = data.map((action) => window.MockService.enrichAction(action));
+    }
+    populateLibraryRegionFilter();
+    renderActionLibraryGrid();
+  } catch {
+    els.libraryGrid.innerHTML = "<p class=\"hint\">动作库加载失败，请确认后端已启动。</p>";
+  }
+}
+
+function populateLibraryRegionFilter() {
+  const select = document.getElementById("library-filter-region");
+  if (!select) return;
+  const regions = new Set();
+  state.actionLibrary.forEach((action) => (action.body_regions || []).forEach((r) => regions.add(r)));
+  const current = select.value;
+  select.innerHTML = `<option value="">全部部位</option>${Array.from(regions)
+    .sort()
+    .map((region) => `<option value="${escapeAdminText(region)}">${escapeAdminText(region)}</option>`)
+    .join("")}`;
+  select.value = current;
+}
+
+function renderActionLibraryGrid() {
+  if (!els.libraryGrid) return;
+  const filtered = filterActionLibrary(state.actionLibrary);
+  if (!filtered.length) {
+    els.libraryGrid.innerHTML = "<p class=\"hint\">没有匹配的动作。</p>";
+    return;
+  }
+  els.libraryGrid.innerHTML = filtered.map(renderLibraryActionCard).join("");
+  els.libraryGrid.querySelectorAll(".library-view-demo").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = state.actionLibrary.find((item) => item.id === button.dataset.actionId);
+      if (action) void showDemo(action);
+    });
+  });
+}
+
+// ── M5: Voice cue ──
+async function fetchVoiceCue(feedback, status, score) {
+  if (!state.voiceEnabled || window.APP_CONFIG.DEMO_MODE) return;
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/voice/cue`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feedback, status, score, enabled: true }),
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const textEl = document.getElementById("voice-cue-text");
+    if (textEl) textEl.textContent = data.text || "";
+    if (data.enabled && data.text && "speechSynthesis" in window) {
+      const utterance = new SpeechSynthesisUtterance(data.text);
+      utterance.lang = "zh-CN";
+      utterance.rate = data.rate || 1;
+      speechSynthesis.cancel();
+      speechSynthesis.speak(utterance);
+    }
+  } catch { /* voice is non-critical */ }
+}
+
+function toggleVoice() {
+  state.voiceEnabled = !state.voiceEnabled;
+  const btn = document.getElementById("toggle-voice");
+  if (btn) btn.textContent = state.voiceEnabled ? "关闭语音播报" : "开启语音播报";
+  const indicator = document.getElementById("voice-indicator");
+  if (indicator) indicator.classList.toggle("active", state.voiceEnabled);
+  if (!state.voiceEnabled && "speechSynthesis" in window) speechSynthesis.cancel();
+}
+
+// ── M5: Training counter ──
+function startTrainingCounter() {
+  state.trainingStartTime = Date.now();
+  state.trainingRepCount = 0;
+  state.trainingSetCount = 0;
+  state.lastRepStatus = null;
+  updateCounterDisplay();
+  if (state.trainingTimer) clearInterval(state.trainingTimer);
+  state.trainingTimer = setInterval(updateCounterDisplay, 1000);
+}
+
+function stopTrainingCounter() {
+  if (state.trainingTimer) { clearInterval(state.trainingTimer); state.trainingTimer = null; }
+}
+
+function updateCounterDisplay() {
+  const elapsed = state.trainingStartTime ? Math.floor((Date.now() - state.trainingStartTime) / 1000) : 0;
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const durationEl = document.getElementById("counter-duration");
+  const repsEl = document.getElementById("counter-reps");
+  const setsEl = document.getElementById("counter-sets");
+  if (durationEl) durationEl.textContent = `${mins}:${String(secs).padStart(2, "0")}`;
+  if (repsEl) repsEl.textContent = String(state.trainingRepCount);
+  if (setsEl) setsEl.textContent = String(state.trainingSetCount);
+}
+
+function countRep(status) {
+  if (status === "ok" && state.lastRepStatus !== "ok") {
+    state.trainingRepCount++;
+    const targetReps = state.currentAction?.reps || 10;
+    if (state.trainingRepCount > 0 && state.trainingRepCount % targetReps === 0) {
+      state.trainingSetCount++;
+    }
+    updateCounterDisplay();
+  }
+  state.lastRepStatus = status;
+}
+
+// ── M5: Fatigue monitoring ──
+async function loadFatigueStatus() {
+  const card = document.getElementById("training-fatigue-card");
+  if (!card || !isSessionReady() || window.APP_CONFIG.DEMO_MODE) return;
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/wearables/fatigue/status`, { headers: authHeaders() });
+    if (!response.ok) return;
+    const data = await response.json();
+    card.hidden = false;
+    document.getElementById("fatigue-score").textContent = data.fatigue_score ?? "—";
+    const levelEl = document.getElementById("fatigue-level");
+    if (levelEl) {
+      levelEl.textContent = data.risk_level || "未检测";
+      levelEl.className = `fatigue-label fatigue-${data.risk_level || "low"}`;
+    }
+    document.getElementById("fatigue-recommendation").textContent = data.recommendation || "";
+    const signalsEl = document.getElementById("fatigue-signals");
+    if (signalsEl) signalsEl.innerHTML = (data.signals || []).map(s => `<li>${escapeAdminText(s)}</li>`).join("");
+    if (data.should_stop) showToast("疲劳度较高，建议暂停训练休息");
+  } catch { /* fatigue is optional */ }
+}
+
+// ── M6: Progress tracking page ──
+async function loadProgressPage() {
+  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) return;
+  await Promise.all([loadProgressStats(), loadProgressReport()]);
+}
+
+async function loadProgressStats() {
+  const grid = els.progressStatsGrid;
+  const vasChart = els.progressVasChart;
+  const completionEl = els.progressCompletion;
+  if (!grid) return;
+  grid.innerHTML = '<p class="hint">正在加载…</p>';
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/visualization?days=30`, { headers: authHeaders() });
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    const trend = data.trend?.points || [];
+    grid.innerHTML = `
+      <div class="progress-stat-card"><span class="progress-stat-value">${data.total_checkins}</span><span class="progress-stat-label">打卡次数</span></div>
+      <div class="progress-stat-card"><span class="progress-stat-value">${data.active_days}</span><span class="progress-stat-label">活跃天数</span></div>
+      <div class="progress-stat-card"><span class="progress-stat-value">${data.avg_score ?? "—"}</span><span class="progress-stat-label">平均得分</span></div>
+      <div class="progress-stat-card"><span class="progress-stat-value">${data.avg_pain_change != null ? (data.avg_pain_change > 0 ? "+" : "") + data.avg_pain_change.toFixed(1) : "—"}</span><span class="progress-stat-label">疼痛变化</span></div>
+    `;
+    if (vasChart && trend.length) {
+      const maxPain = 10;
+      const barW = Math.max(20, Math.min(60, Math.floor(600 / trend.length)));
+      vasChart.innerHTML = `
+        <div class="vas-chart">
+          ${trend.map(p => {
+            const before = p.avg_pain_before ?? 0;
+            const after = p.avg_pain_after ?? 0;
+            return `<div class="vas-bar-group" style="width:${barW}px">
+              <div class="vas-bars">
+                <div class="vas-bar vas-before" style="height:${(before / maxPain) * 100}%" title="训练前:${before.toFixed(1)}"></div>
+                <div class="vas-bar vas-after" style="height:${(after / maxPain) * 100}%" title="训练后:${after.toFixed(1)}"></div>
+              </div>
+              <span class="vas-date">${p.date?.slice(5) || ""}</span>
+            </div>`;
+          }).join("")}
+        </div>
+        <div class="vas-legend"><span class="vas-legend-item"><span class="vas-dot vas-before"></span>训练前</span><span class="vas-legend-item"><span class="vas-dot vas-after"></span>训练后</span></div>
+      `;
+    } else if (vasChart) {
+      vasChart.innerHTML = '<p class="hint">暂无疼痛记录数据</p>';
+    }
+    if (completionEl && trend.length) {
+      const totalDays = trend.length;
+      const activeDays = trend.filter(p => p.checkin_count > 0).length;
+      const rate = totalDays > 0 ? Math.round((activeDays / totalDays) * 100) : 0;
+      completionEl.innerHTML = `
+        <div class="completion-bar-wrap"><div class="completion-bar" style="width:${rate}%"></div></div>
+        <p>${activeDays}/${totalDays} 天完成训练 · 完成率 <strong>${rate}%</strong></p>
+      `;
+    }
+  } catch {
+    grid.innerHTML = '<p class="hint">进度数据加载失败</p>';
+  }
+}
+
+async function loadProgressReport() {
+  const reportEl = els.progressReport;
+  const actionsEl = els.progressReportActions;
+  if (!reportEl) return;
+  reportEl.innerHTML = '<p class="hint">正在生成周报…</p>';
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/report?period=week`, { headers: authHeaders() });
+    if (!response.ok) throw new Error();
+    const r = await response.json();
+    reportEl.innerHTML = `
+      <p><strong>周期：</strong>${r.start_date} 至 ${r.end_date}</p>
+      <p><strong>完成率：</strong>${(r.completion_rate * 100).toFixed(0)}%（${r.active_days}/${r.expected_days} 天）</p>
+      <p><strong>平均得分：</strong>${r.avg_score ?? "—"}</p>
+      <p><strong>疼痛变化：</strong>${r.vas_summary || "暂无"}</p>
+      ${r.action_summaries?.length ? `<h4>动作统计</h4><ul>${r.action_summaries.map(a => `<li>${escapeAdminText(a.action_name)}：${a.count} 次${a.avg_score != null ? `，均分 ${a.avg_score}` : ""}</li>`).join("")}</ul>` : ""}
+      ${r.highlights?.length ? `<h4>亮点</h4><ul>${r.highlights.map(h => `<li>${escapeAdminText(h)}</li>`).join("")}</ul>` : ""}
+      ${r.risks?.length ? `<h4>风险</h4><ul>${r.risks.map(h => `<li>${escapeAdminText(h)}</li>`).join("")}</ul>` : ""}
+      ${r.recommendations?.length ? `<h4>建议</h4><ul>${r.recommendations.map(h => `<li>${escapeAdminText(h)}</li>`).join("")}</ul>` : ""}
+    `;
+    if (actionsEl) actionsEl.hidden = false;
+  } catch {
+    reportEl.innerHTML = '<p class="hint">周报生成失败，请确认有训练打卡记录。</p>';
+  }
+}
+
+async function exportProgressReport() {
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/report/export?period=week&format=markdown`, { headers: authHeaders() });
+    if (!response.ok) throw new Error();
+    const text = await response.text();
+    const blob = new Blob([text], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "康复周报.md"; a.click();
+    URL.revokeObjectURL(url);
+    showToast("周报已导出");
+  } catch { showToast("周报导出失败"); }
+}
+
+function initProfilePainRegions() {
+  if (!els.profilePainRegions) return;
+  window.PAIN_REGIONS.forEach((region) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chip";
+    button.textContent = region;
+    button.addEventListener("click", () => {
+      if (state.profileFormRegions.has(region)) {
+        state.profileFormRegions.delete(region);
+        button.classList.remove("selected");
+      } else {
+        state.profileFormRegions.add(region);
+        button.classList.add("selected");
+      }
+    });
+    els.profilePainRegions.appendChild(button);
+  });
+}
+
+function bindProfilesPageEvents() {
+  if (els.profilesList?.dataset.bound === "true") return;
+  if (els.profilesList) els.profilesList.dataset.bound = "true";
+
+  els.profilesList?.addEventListener("click", async (event) => {
+    const useBtn = event.target.closest(".profile-use-btn");
+    if (useBtn) {
+      const profile = state.patientProfiles.find((item) => item.id === Number(useBtn.dataset.profileId));
+      if (profile) {
+        state.selectedPatientProfileId = profile.id;
+        renderPatientProfileSelect();
+        applyPatientProfileToIntake(profile);
+        goToStep("intake");
+        showToast(`已关联档案：${profile.name}`);
+      }
+      return;
+    }
+    const editBtn = event.target.closest(".profile-edit-btn");
+    if (editBtn) {
+      const profile = state.patientProfiles.find((item) => item.id === Number(editBtn.dataset.profileId));
+      if (profile) fillProfileForm(profile);
+      return;
+    }
+    const deleteBtn = event.target.closest(".profile-delete-btn");
+    if (deleteBtn) {
+      await deleteProfile(Number(deleteBtn.dataset.profileId));
+    }
+  });
 }
 
 function todayIsoDate() {
@@ -1488,9 +2430,17 @@ async function requestPrescription(formData) {
   }
 
   if (!response.ok) {
-    const detail = await parseApiError(response);
-    const error = new Error(detail || `HTTP ${response.status}`);
+    const detail = await parseApiErrorDetail(response);
+    const message =
+      typeof detail === "object" && detail !== null
+        ? detail.message || JSON.stringify(detail)
+        : detail || `HTTP ${response.status}`;
+    const error = new Error(message);
     error.status = response.status;
+    if (typeof detail === "object" && detail?.code === "red_flag_detected") {
+      error.code = detail.code;
+      error.redFlags = detail.red_flags || [];
+    }
     throw error;
   }
 
@@ -1530,7 +2480,7 @@ function renderPrescription(prescription) {
   if (prescription.patient_name) metaParts.push(`患者：${prescription.patient_name}`);
   if (prescription.patient_age) metaParts.push(`年龄：${prescription.patient_age}`);
   if (prescription.source === "mock") metaParts.push("来源：本地 Mock");
-  if (prescription.source === "api") metaParts.push("来源：豆包后端 API");
+  if (prescription.source === "api") metaParts.push("来源：DeepSeek 后端 API");
   els.prescriptionMeta.textContent = metaParts.join(" · ");
   els.prescriptionSummary.innerHTML = formatSummary(prescription.summary);
   els.actionList.innerHTML = "";
@@ -1555,6 +2505,7 @@ function renderPrescription(prescription) {
           <span class="tag">${action.sets} 组</span>
           <span class="tag">${action.reps} 次/组</span>
           ${action.frequency ? `<span class="tag tag-frequency">${action.frequency}</span>` : ""}
+          ${action.difficulty_level ? `<span class="tag tag-difficulty${action.difficulty_level === "中级" ? " mid" : action.difficulty_level === "高级" ? " advanced" : ""}">${escapeAdminText(action.difficulty_level)}</span>` : ""}
           <span class="tag ${poseSupported ? "tag-supported" : "tag-pending"}">
             ${poseSupported ? "支持实时纠正" : "暂不支持实时纠正"}
           </span>
@@ -1640,6 +2591,8 @@ function updatePoseFeedback(result) {
   if (typeof score === "number" && score < 60 && navigator.vibrate) {
     navigator.vibrate(80);
   }
+  countRep(status);
+  fetchVoiceCue(feedback, status, score);
 }
 
 async function correctPose(payload) {
@@ -1772,53 +2725,46 @@ function preloadPoseTracker() {
 }
 
 function showDemo(action) {
-  state.currentAction = action;
+  return showDemoAsync(action);
+}
+
+async function showDemoAsync(action) {
+  const detail = await fetchActionDetail(action);
+  state.currentAction = detail;
 
   const nameEl = document.getElementById("demo-action-name");
   const imgEl = document.getElementById("demo-action-image");
   const metaEl = document.getElementById("demo-meta");
   const descEl = document.getElementById("demo-action-desc");
-  const contraSec = document.getElementById("demo-contraindications-section");
   const contraEl = document.getElementById("demo-contraindications");
-  const progSec = document.getElementById("demo-progression-section");
   const progEl = document.getElementById("demo-progression");
   const videoWrap = document.getElementById("demo-video-wrap");
   const videoLink = document.getElementById("demo-video-link");
   const videoHintEl = document.getElementById("demo-video-hint");
   const startBtn = document.getElementById("demo-start-training");
 
-  if (nameEl) nameEl.textContent = action.name;
+  if (nameEl) nameEl.textContent = detail.name;
 
   if (imgEl) {
     imgEl.classList.remove("is-missing");
-    imgEl.src = window.APP_CONFIG.assetUrl(action.image);
-    imgEl.alt = `${action.name}示意图`;
+    imgEl.src = window.APP_CONFIG.assetUrl(detail.image);
+    imgEl.alt = `${detail.name}示意图`;
   }
 
   if (metaEl) {
-    const parts = [];
-    if (action.sets) parts.push(`${action.sets} 组`);
-    if (action.reps) parts.push(`${action.reps} 次/组`);
-    if (action.frequency) parts.push(action.frequency);
-    metaEl.innerHTML = parts.map((p) => `<span class="tag">${p}</span>`).join("");
+    metaEl.innerHTML = renderActionMetaTags(detail);
   }
 
-  if (descEl) descEl.textContent = action.description || "按医嘱缓慢完成动作，注意呼吸节奏。";
+  if (descEl) descEl.textContent = detail.description || "按医嘱缓慢完成动作，注意呼吸节奏。";
+  renderActionDetailSections(detail);
 
-  if (contraSec && contraEl) {
-    contraSec.hidden = !action.contraindications;
-    contraEl.textContent = action.contraindications || "";
-  }
-
-  if (progSec && progEl) {
-    progSec.hidden = !action.progression;
-    progEl.textContent = action.progression || "";
-  }
+  if (contraEl) contraEl.textContent = detail.contraindications || "";
+  if (progEl) progEl.textContent = detail.progression || "";
 
   if (videoWrap && videoLink && videoHintEl) {
-    if (isValidVideoUrl(action.videoUrl)) {
+    if (isValidVideoUrl(detail.videoUrl)) {
       videoLink.href = "#";
-      videoLink.dataset.videoUrl = action.videoUrl;
+      videoLink.dataset.videoUrl = detail.videoUrl;
       videoLink.hidden = false;
       videoHintEl.textContent = "";
       videoHintEl.hidden = true;
@@ -1832,7 +2778,7 @@ function showDemo(action) {
     }
   }
 
-  const poseSupported = window.APP_CONFIG.isPoseSupported(action.id);
+  const poseSupported = window.APP_CONFIG.isPoseSupported(detail.id);
   if (startBtn) {
     startBtn.hidden = !poseSupported;
   }
@@ -1870,6 +2816,8 @@ function startTraining(action) {
   els.videoShell.classList.remove("status-ok", "status-warning", "status-error");
   goToStep("training");
   preloadPoseTracker();
+  startTrainingCounter();
+  loadFatigueStatus();
 }
 
 async function startCamera() {
@@ -1925,6 +2873,7 @@ function stopCamera() {
 }
 
 function completeTraining() {
+  stopTrainingCounter();
   const action = state.currentAction;
   if (!action) return;
   state.currentAction = null;
@@ -1980,20 +2929,20 @@ function applyDevModeUi() {
 
 async function testDoubaoConnection() {
   if (window.APP_CONFIG.DEMO_MODE) {
-    showToast("请先关闭 Demo 模式再测试豆包连接");
+    showToast("请先关闭 Demo 模式再测试 DeepSeek 连接");
     return;
   }
 
-  setLoading(true, "正在测试豆包 API 连接…");
+  setLoading(true, "正在测试 DeepSeek API 连接…");
   try {
     const response = await fetchWithTimeout(
-      `${window.APP_CONFIG.API_BASE}/test_doubao`,
+      `${window.APP_CONFIG.API_BASE}/test_deepseek`,
       { method: "POST" },
       window.APP_CONFIG.PRESCRIPTION_TIMEOUT_MS
     );
     const data = await response.json();
     if (data.status === "success") {
-      showToast("豆包连接成功，摘要已生成");
+      showToast("DeepSeek 连接成功，摘要已生成");
       const summaryContent =
         typeof data.summary === "string"
           ? data.summary
@@ -2001,11 +2950,11 @@ async function testDoubaoConnection() {
       showDoubaoResult(summaryContent);
     } else {
       showDoubaoResult(data);
-      showToast(`豆包连接失败：${data.detail || "未知错误"}`);
+      showToast(`DeepSeek 连接失败：${data.detail || "未知错误"}`);
     }
   } catch (error) {
-    showDoubaoResult({ error: "豆包测试请求失败，请检查后端与环境变量" });
-    showToast("豆包测试请求失败，请检查后端与环境变量");
+    showDoubaoResult({ error: "DeepSeek 测试请求失败，请检查后端与环境变量" });
+    showToast("DeepSeek 测试请求失败，请检查后端与环境变量");
   } finally {
     setLoading(false);
   }
@@ -2028,6 +2977,7 @@ function initPainRegions() {
       if (state.selectedPainRegions.size > 0) {
         els.painRegionsError.textContent = "";
       }
+      updateMobilityGuide();
     });
     els.painRegions.appendChild(button);
   });
@@ -2057,6 +3007,7 @@ function bindEvents() {
 
   els.mobilityScore.addEventListener("input", (event) => {
     els.mobilityValue.textContent = event.target.value;
+    updateMobilityTierDisplay(Number(event.target.value));
   });
 
   els.intakeForm.addEventListener("submit", async (event) => {
@@ -2084,13 +3035,17 @@ function bindEvents() {
       goToStep("prescription");
       showToast(
         prescription.source === "api"
-          ? "处方已由后端豆包服务生成"
+          ? "处方已由后端 DeepSeek 服务生成"
           : "已使用本地 Mock 处方"
       );
     } catch (error) {
       stopPrescriptionLoading();
       const isTimeout = error?.name === "AbortError";
-      if (error?.status === 400) {
+      if (error?.code === "red_flag_detected") {
+        showRedFlagAlert(error.message, error.redFlags);
+        els.symptomsError.textContent = "主诉含红旗症状，请查看屏幕中央预警提示";
+        showToast("检测到红旗症状，已暂停生成处方");
+      } else if (error?.status === 400) {
         if (error.message.includes("疼痛部位")) {
           els.painRegionsError.textContent = error.message;
         } else {
@@ -2100,8 +3055,8 @@ function bindEvents() {
       } else {
         showToast(
           isTimeout
-            ? "豆包生成超时，请稍后重试或检查后端配置"
-            : "处方服务失败，请检查后端与 DOUBAO_API_KEY"
+            ? "DeepSeek 生成超时，请稍后重试或检查后端配置"
+            : "处方服务失败，请检查后端与 DeepSeek_API_KEY"
         );
       }
     } finally {
@@ -2134,6 +3089,11 @@ function bindEvents() {
   els.patientProfileSelect?.addEventListener("change", (event) => {
     const value = event.target.value;
     state.selectedPatientProfileId = value ? Number(value) : null;
+    if (state.selectedPatientProfileId) {
+      const profile = state.patientProfiles.find((item) => item.id === state.selectedPatientProfileId);
+      applyPatientProfileToIntake(profile);
+    }
+    loadImagingReports();
   });
 
   document.getElementById("save-patient-profile")?.addEventListener("click", async () => {
@@ -2149,7 +3109,50 @@ function bindEvents() {
     }
   });
 
+  els.goProgressButton?.addEventListener("click", () => goToStep("progress"));
+  document.getElementById("back-from-progress")?.addEventListener("click", () => goToStep("history"));
+  document.getElementById("export-report-md")?.addEventListener("click", exportProgressReport);
+  document.getElementById("toggle-voice")?.addEventListener("click", toggleVoice);
   els.adminEntryButton?.addEventListener("click", () => goToStep("admin"));
+  els.profilesEntryButton?.addEventListener("click", () => {
+    state.profileReturnStep = state.currentStep === "profiles" ? "intake" : state.currentStep;
+    goToStep("profiles");
+  });
+  els.libraryEntryButton?.addEventListener("click", () => goToStep("library"));
+  document.getElementById("open-profiles-from-intake")?.addEventListener("click", () => {
+    state.profileReturnStep = "intake";
+    goToStep("profiles");
+  });
+  document.getElementById("back-from-profiles")?.addEventListener("click", () => goToStep(state.profileReturnStep || "intake"));
+  document.getElementById("back-from-library")?.addEventListener("click", () => goToStep("intake"));
+  document.getElementById("profile-create-toggle")?.addEventListener("click", () => {
+    resetProfileForm();
+    if (els.profileFormCard) els.profileFormCard.hidden = false;
+  });
+  document.getElementById("profile-form-cancel")?.addEventListener("click", resetProfileForm);
+  document.getElementById("refresh-profiles")?.addEventListener("click", loadProfilesPage);
+  els.profileForm?.addEventListener("submit", saveProfileForm);
+  document.getElementById("upload-imaging-report")?.addEventListener("click", uploadImagingReport);
+  document.getElementById("red-flag-dismiss")?.addEventListener("click", hideRedFlagAlert);
+  els.redFlagOverlay?.addEventListener("click", (event) => {
+    if (event.target === els.redFlagOverlay) hideRedFlagAlert();
+  });
+  document.getElementById("refresh-library")?.addEventListener("click", loadActionLibrary);
+  document.getElementById("library-filter-q")?.addEventListener("input", (event) => {
+    state.libraryFilters.q = event.target.value;
+    clearTimeout(window.libraryFilterTimer);
+    window.libraryFilterTimer = window.setTimeout(renderActionLibraryGrid, 200);
+  });
+  document.getElementById("library-filter-region")?.addEventListener("change", (event) => {
+    state.libraryFilters.bodyRegion = event.target.value;
+    renderActionLibraryGrid();
+  });
+  document.getElementById("library-filter-difficulty")?.addEventListener("change", (event) => {
+    state.libraryFilters.difficulty = event.target.value;
+    renderActionLibraryGrid();
+  });
+  bindProfilesPageEvents();
+  bindImagingReportEvents();
   bindAdminPanelEvents();
   bindAdminQuickNavEvents();
   document.getElementById("back-from-admin")?.addEventListener("click", () => goToStep("intake"));
@@ -2179,6 +3182,7 @@ function bindEvents() {
   });
   document.getElementById("stop-training").addEventListener("click", () => {
     stopCamera();
+    stopTrainingCounter();
     resetStartCameraButton();
     goToStep("prescription");
   });
@@ -2242,12 +3246,15 @@ function init() {
   }
 
   initPainRegions();
-bindEvents();
-applyDevModeUi();
-updateModeBadge();
-updateAuthStatus();
-updateAdminEntry();
-switchAuthTab("login");
+  initProfilePainRegions();
+  bindEvents();
+  applyDevModeUi();
+  updateModeBadge();
+  updateAuthStatus();
+  updateAdminEntry();
+  updateMobilityTierDisplay(Number(els.mobilityScore?.value || 5));
+  updateMobilitySummary(Number(els.mobilityScore?.value || 5));
+  switchAuthTab("login");
 
   if (isSessionReady()) {
     loadPatientProfiles();
