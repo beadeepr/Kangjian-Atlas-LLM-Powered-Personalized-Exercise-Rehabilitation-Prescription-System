@@ -305,6 +305,8 @@ class ActionItem(BaseModel):
     steps: Optional[List[str]] = None
     common_mistakes: Optional[List[str]] = None
     correct_cues: Optional[List[str]] = None
+    error_comparisons: Optional[List[dict]] = None
+    difficulty_profiles: Optional[List[dict]] = None
     risk_level: Optional[str] = None
     note: Optional[str] = None
     description: Optional[str] = None
@@ -334,6 +336,8 @@ class ActionUpdateRequest(BaseModel):
     steps: Optional[List[str]] = None
     common_mistakes: Optional[List[str]] = None
     correct_cues: Optional[List[str]] = None
+    error_comparisons: Optional[List[dict]] = None
+    difficulty_profiles: Optional[List[dict]] = None
     risk_level: Optional[str] = None
     note: Optional[str] = None
     description: Optional[str] = None
@@ -366,6 +370,7 @@ class PoseCorrectionResponse(BaseModel):
     feedback: List[str]
     score: Optional[int] = None
     status: Optional[str] = None
+    voice_cue: Optional[dict] = None
 
 
 class PoseInferenceRequest(BaseModel):

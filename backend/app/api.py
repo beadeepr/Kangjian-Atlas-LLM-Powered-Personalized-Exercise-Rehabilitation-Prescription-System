@@ -395,6 +395,8 @@ def clean_action_payload(req: ActionItem | ActionUpdateRequest, partial: bool = 
         "steps": raw_data.get("steps") or [],
         "common_mistakes": raw_data.get("common_mistakes") or [],
         "correct_cues": raw_data.get("correct_cues") or [],
+        "error_comparisons": raw_data.get("error_comparisons") or [],
+        "difficulty_profiles": raw_data.get("difficulty_profiles") or [],
         "risk_level": risk_level,
         "frequency": raw_data.get("frequency").strip() if raw_data.get("frequency") else None,
         "description": raw_data.get("description").strip() if raw_data.get("description") else None,
@@ -433,6 +435,8 @@ def action_item_from_payload(payload: dict):
         steps=payload.get("steps"),
         common_mistakes=payload.get("common_mistakes"),
         correct_cues=payload.get("correct_cues"),
+        error_comparisons=payload.get("error_comparisons"),
+        difficulty_profiles=payload.get("difficulty_profiles"),
         risk_level=payload.get("risk_level"),
         note=payload.get("note") or payload.get("description"),
         description=payload.get("description"),
@@ -1173,6 +1177,7 @@ def admin_create_action(req: ActionItem, current_user=Depends(get_admin_user)):
     from .cache import cache_delete
 
     cache_delete("actions:v1")
+    cache_delete("actions:v2")
     return action_item_from_payload(action)
 
 
@@ -1202,6 +1207,7 @@ def admin_update_action(action_id: str, req: ActionUpdateRequest, current_user=D
     from .cache import cache_delete
 
     cache_delete("actions:v1")
+    cache_delete("actions:v2")
     return action_item_from_payload(action)
 
 
@@ -1215,6 +1221,7 @@ def admin_delete_action(action_id: str, current_user=Depends(get_admin_user)):
     from .cache import cache_delete
 
     cache_delete("actions:v1")
+    cache_delete("actions:v2")
     return {"message": "action deleted"}
 
 
@@ -2002,20 +2009,73 @@ def list_prescriptions(db: Session = Depends(get_db), current_user=Depends(get_c
 
 
 @router.get("/actions", response_model=list[ActionItem])
-def list_actions():
+def list_actions(
+    q: str | None = None,
+    body_region: str | None = None,
+    condition: str | None = None,
+    category: str | None = None,
+    difficulty_level: str | None = None,
+    risk_level: str | None = None,
+    limit: int = 100,
+    offset: int = 0,
+):
     from .cache import cache_get_json, cache_set_json
-    from .knowledge import load_action_library
+    from .exercise_library import action_to_dict, list_exercises
 
-    cached = cache_get_json("actions:v1")
-    if cached:
-        return cached
-    actions = load_action_library()
+    use_cache = not any([q, body_region, condition, category, difficulty_level, risk_level]) and limit == 100 and offset == 0
+    if use_cache:
+        cached = cache_get_json("actions:v2")
+        if cached:
+            return cached
+    actions = list_exercises(
+        q=q,
+        body_region=body_region,
+        condition=condition,
+        category=category,
+        difficulty_level=difficulty_level,
+        risk_level=risk_level,
+        limit=limit,
+        offset=offset,
+    )
     cache_payload = [
-        action.model_dump() if hasattr(action, "model_dump") else action.dict()
+        action_to_dict(action)
         for action in actions
     ]
-    cache_set_json("actions:v1", cache_payload)
+    if use_cache:
+        cache_set_json("actions:v2", cache_payload)
     return actions
+
+
+@router.get("/actions/meta")
+def action_library_meta():
+    from .exercise_library import build_library_meta
+
+    return build_library_meta()
+
+
+@router.get("/actions/{action_id}", response_model=ActionItem)
+def read_action_detail(action_id: str):
+    from .exercise_library import get_exercise_detail
+
+    action = get_exercise_detail(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+    return action
+
+
+@router.get("/actions/{action_id}/difficulty_levels")
+def read_action_difficulty_levels(action_id: str):
+    from .exercise_library import get_exercise_detail
+
+    action = get_exercise_detail(action_id)
+    if not action:
+        raise HTTPException(status_code=404, detail="Action not found")
+    return {
+        "action_id": action.id,
+        "name": action.name,
+        "current_level": action.difficulty_level,
+        "levels": action.difficulty_profiles or [],
+    }
 
 
 @router.get("/knowledge/articles", response_model=KnowledgeArticleListResponse)
