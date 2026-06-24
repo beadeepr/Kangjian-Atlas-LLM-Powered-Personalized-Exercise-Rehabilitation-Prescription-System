@@ -5,3 +5,5 @@ requests
 SQLAlchemy
 numpy
 python-dotenv
+onnxruntime
+opencv-python

@@ -1600,16 +1600,27 @@ function getPoseActionId(action) {
 function queuePosePayload(frame) {
   if (!state.currentAction?.id || !state.autoPoseEnabled) return;
 
+  if (!frame?.keypoints?.length || !frame?.visibility?.length) {
+    // 不再对用户显示“检测受阻”提示（可能为短暂遮挡或帧丢失），仅记录供调试使用
+    console.debug("queuePosePayload: no keypoints/visibility in frame — skipping", {
+      keypoints: frame?.keypoints?.length,
+      visibility: frame?.visibility?.length,
+    });
+    return;
+  }
+
+  if (frame.keypoints && frame.visibility && (frame.keypoints.length !== 17 || frame.visibility.length !== 17)) {
+    console.warn("partial pose frame received", {
+      keypoints: frame.keypoints?.length,
+      visibility: frame.visibility?.length,
+    });
+    // 允许继续发送不完整的关键点，让后端决定如何处理
+  }
+
   const avgVisibility = averageVisibility(frame.visibility);
   if (avgVisibility < window.APP_CONFIG.POSE_VISIBILITY_MIN) {
-    state.pendingPosePayload = null;
-    updatePoseFeedback({
-      feedback: ["请调整站位，确保全身入镜且光线充足"],
-      score: null,
-      status: "warning",
-    });
-    els.statusText.textContent = "检测受阻";
-    return;
+    // 原先这里会阻断并显示提示；现改为仅记录警告并继续发送，由后端决定如何处理
+    console.warn("low average visibility", { avgVisibility });
   }
 
   const now = Date.now();
@@ -1811,9 +1822,7 @@ async function startCamera() {
     showToast("摄像头已启动，正在实时分析动作");
   } catch (error) {
     stopCamera();
-    showToast(error?.message?.includes("MediaPipe")
-      ? "姿态模型加载失败，请检查网络后重试"
-      : "无法访问摄像头，请检查浏览器权限");
+    showToast("无法访问摄像头或姿态模型加载失败，请检查浏览器权限与网络");
   } finally {
     setCameraLoading(false);
     if (els.startCameraButton && state.cameraStream) {

@@ -420,17 +420,17 @@ def create_pose_feedback(db: Session, request: schema.PoseCorrectionRequest):
             "score": 0,
             "status": "error",
         }
-    elif len(request.keypoints) < 33:
-        result = {
-            "feedback": ["姿态关键点不足，请确保全身进入画面。"],
-            "score": 0,
-            "status": "error",
-        }
     else:
+        keypoints = request.keypoints or []
+        visibility = request.visibility or []
+        if len(keypoints) < 17:
+            keypoints = keypoints + [[0.0, 0.0, 0.0]] * (17 - len(keypoints))
+        if len(visibility) < 17:
+            visibility = visibility + [0.0] * (17 - len(visibility))
         result = analyze_pose(
             action_id=request.action_id,
-            keypoints=request.keypoints,
-            visibility=request.visibility or [1.0] * len(request.keypoints),
+            keypoints=keypoints,
+            visibility=visibility,
         )
 
     db_feedback = models.PoseFeedbackModel(
