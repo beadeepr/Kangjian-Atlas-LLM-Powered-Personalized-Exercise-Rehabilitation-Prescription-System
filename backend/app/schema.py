@@ -366,6 +366,16 @@ class PoseCorrectionResponse(BaseModel):
     feedback: List[str]
     score: Optional[int] = None
     status: Optional[str] = None
+
+
+class PoseInferenceRequest(BaseModel):
+    image_base64: str
+    conf_threshold: Optional[float] = 0.2
+
+
+class PoseInferenceResponse(BaseModel):
+    keypoints: List[List[float]]
+    visibility: List[float]
     voice_cue: Optional[dict] = None
 
 

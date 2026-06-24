@@ -35,6 +35,7 @@ from .crud import (
     update_patient_profile,
     update_training_checkin,
 )
+from .pose_inference import infer_pose_from_image_base64
 from .database import SessionLocal
 from .schema import (
     ActionItem,
@@ -67,6 +68,8 @@ from .schema import (
     PrescriptionAdjustmentCreateRequest,
     PrescriptionAdjustmentDecisionRequest,
     PrescriptionAdjustmentResponse,
+    PoseInferenceRequest,
+    PoseInferenceResponse,
     PrescriptionRequest,
     PrescriptionResponse,
     PrescriptionReviewResponse,
@@ -1971,6 +1974,13 @@ def decide_prescription_adjustment(
     apply_adjustment(db, adjustment)
     db.refresh(adjustment)
     return PrescriptionAdjustmentResponse(**adjustment_response(adjustment))
+
+
+@router.post("/infer_pose", response_model=PoseInferenceResponse)
+def infer_pose(req: PoseInferenceRequest):
+    conf_threshold = req.conf_threshold if req.conf_threshold is not None else 0.2
+    keypoints, visibility = infer_pose_from_image_base64(req.image_base64, conf_threshold)
+    return PoseInferenceResponse(keypoints=keypoints, visibility=visibility)
 
 
 @router.get("/prescriptions", response_model=list[PrescriptionResponse])
