@@ -48,6 +48,26 @@ function scoreAction(action, symptoms, painRegions, history) {
   return score;
 }
 
+const SIMILAR_ACTION_GROUPS = [
+  ["neck_chin_tuck", "chin_tuck"],
+  ["bird_dog", "dead_bug"],
+];
+
+function dedupeSimilarActions(actions) {
+  const kept = [];
+  const usedGroups = new Set();
+  for (const action of actions) {
+    const group = SIMILAR_ACTION_GROUPS.find((ids) => ids.includes(action.id));
+    if (group) {
+      const key = group.join("|");
+      if (usedGroups.has(key)) continue;
+      usedGroups.add(key);
+    }
+    kept.push(action);
+  }
+  return kept;
+}
+
 function selectActionsForPrescription(formData) {
   const catalog = Object.values(window.ACTION_CATALOG);
   const scored = catalog
@@ -61,7 +81,7 @@ function selectActionsForPrescription(formData) {
 
   if (selected.length < 2) {
     const regionDefaults = {
-      颈部: ["neck_side_bend", "chin_tuck"],
+      颈部: ["neck_chin_tuck", "neck_side_bend"],
       肩部: ["scapular_retraction", "neck_side_bend"],
       腰部: ["cat_cow", "pelvic_tilt"],
       膝关节: ["wall_squat", "straight_leg_raise"],
@@ -91,7 +111,7 @@ function selectActionsForPrescription(formData) {
     }));
   }
 
-  return selected.slice(0, 4).map((action) =>
+  return dedupeSimilarActions(selected.slice(0, 4)).map((action) =>
     enrichAction({
       id: action.id,
       name: action.name,

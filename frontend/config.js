@@ -34,7 +34,6 @@ window.APP_CONFIG = {
   SUPPORTED_POSE_ACTION_IDS: [
     "neck_side_bend",
     "neck_chin_tuck",
-    "chin_tuck",
     "scapular_retraction",
     "thoracic_extension",
     "mckenzie_press_up",
@@ -53,7 +52,6 @@ window.APP_CONFIG = {
   POSE_CAMERA_HINTS: {
     neck_side_bend: "侧对镜头，便于捕捉头颈侧屈幅度",
     neck_chin_tuck: "正面对镜头，保持头颈与肩部清晰入镜",
-    chin_tuck: "正面对镜头，保持头颈与肩部清晰入镜",
     scapular_retraction: "正面对镜头，确保双肩完整入镜",
     thoracic_extension: "正面对镜头或微侧身，便于观察上背伸展",
     mckenzie_press_up: "侧对镜头，便于观察躯干伸展与骨盆位置",
@@ -110,8 +108,8 @@ window.ACTION_CATALOG = {
     target_regions: ["颈部", "肩部"],
     keywords: ["颈", "颈椎", "下巴", "前倾", "伏案", "姿势"],
     image: "assets/actions/neck_chin_tuck.png",
-    videoUrl: "",
-    videoHint: "B站搜索：下巴回收训练 颈椎康复 / Chin Tuck",
+    videoUrl: "https://www.bilibili.com/video/BV1E741117d1/",
+    videoHint: "",
     imageHint: "建议：正侧面示意图，标出下巴水平后移与耳肩对齐",
   },
   neck_side_bend: {
@@ -126,24 +124,8 @@ window.ACTION_CATALOG = {
     keywords: ["颈", "颈椎", "侧屈", "拉伸", "落枕"],
     image: "assets/actions/neck_side_bend.png",
     videoUrl: "",
-    videoHint: "B站搜索：颈部侧屈拉伸 颈椎病康复",
+    videoHint: "",
     imageHint: "建议：正面或侧面示意图，标出耳朵向肩膀靠近的拉伸方向",
-  },
-  chin_tuck: {
-    id: "chin_tuck",
-    name: "收下巴训练",
-    description:
-      "坐位或站位，双眼平视前方，下颌微收使后脑勺与衣领贴近，停留5-8秒后放松。",
-    contraindications: "急性颈椎骨折、严重眩晕发作期暂停。",
-    frequency: "每日1-2次",
-    sets: 3,
-    reps: 10,
-    target_regions: ["颈部"],
-    keywords: ["颈", "收下巴", "头前伸", "富贵包", "伏案"],
-    image: "assets/actions/chin_tuck.png",
-    videoUrl: "",
-    videoHint: "B站搜索：收下巴训练 颈深屈肌 / 头前伸纠正",
-    imageHint: "建议：侧面剪影，标出「后脑勺贴衣领」的要点",
   },
   scapular_retraction: {
     id: "scapular_retraction",
@@ -158,7 +140,7 @@ window.ACTION_CATALOG = {
     keywords: ["肩", "肩胛", "圆肩", "驼背", "姿势"],
     image: "assets/actions/scapular_retraction.png",
     videoUrl: "",
-    videoHint: "B站搜索：肩胛后缩 圆肩纠正 / Scapular Retraction",
+    videoHint: "",
     imageHint: "建议：背面示意图，用箭头标出肩胛骨向脊柱方向夹紧",
   },
   thoracic_extension: {
@@ -173,8 +155,8 @@ window.ACTION_CATALOG = {
     target_regions: ["肩部", "颈部"],
     keywords: ["胸椎", "驼背", "圆肩", "伏案", "伸展"],
     image: "assets/actions/thoracic_extension.png",
-    videoUrl: "",
-    videoHint: "B站搜索：胸椎伸展 坐姿挺胸 康复",
+    videoUrl: "https://www.bilibili.com/video/BV1XMAyziE2J/",
+    videoHint: "",
     imageHint: "建议：坐姿侧面图，标出胸椎后伸而非腰椎过伸",
   },
   cat_cow: {
@@ -189,8 +171,8 @@ window.ACTION_CATALOG = {
     target_regions: ["腰部"],
     keywords: ["腰", "腰椎", "猫牛", "脊柱", "久坐"],
     image: "assets/actions/cat_cow.png",
-    videoUrl: "",
-    videoHint: "B站搜索：猫牛式 脊柱松动 腰痛康复",
+    videoUrl: "https://www.bilibili.com/video/BV1nA411i766/",
+    videoHint: "",
     imageHint: "建议：四点跪位侧面连续两帧，分别示「拱背」与「塌腰」",
   },
   pelvic_tilt: {
@@ -204,8 +186,8 @@ window.ACTION_CATALOG = {
     target_regions: ["腰部"],
     keywords: ["腰", "骨盆", "后倾", "核心", "仰卧"],
     image: "assets/actions/pelvic_tilt.png",
-    videoUrl: "",
-    videoHint: "B站搜索：骨盆后倾 腰背贴地 康复训练",
+    videoUrl: "https://www.bilibili.com/video/BV1xmAfzKEqU/",
+    videoHint: "",
     imageHint: "建议：仰卧侧面图，标出腰椎贴地与骨盆后倾角度",
   },
   bird_dog: {
@@ -220,8 +202,8 @@ window.ACTION_CATALOG = {
     target_regions: ["腰部"],
     keywords: ["腰", "核心", "鸟狗", "稳定", "四点跪"],
     image: "assets/actions/bird_dog.png",
-    videoUrl: "",
-    videoHint: "B站搜索：鸟狗式 Bird Dog 核心稳定",
+    videoUrl: "https://www.bilibili.com/video/BV1bKKVzEEHP",
+    videoHint: "",
     imageHint: "建议：俯视角或侧面图，标出对侧手脚伸展与躯干稳定",
   },
   dead_bug: {
@@ -236,8 +218,8 @@ window.ACTION_CATALOG = {
     target_regions: ["腰部"],
     keywords: ["腰", "核心", "死虫", "仰卧", "稳定"],
     image: "assets/actions/dead_bug.png",
-    videoUrl: "",
-    videoHint: "B站搜索：死虫式 Dead Bug 腰痛康复",
+    videoUrl: "https://www.bilibili.com/video/BV1zYL8zTEcV",
+    videoHint: "",
     imageHint: "建议：仰卧示意图，标出对侧手脚下放时腰椎不离地",
   },
   glute_bridge: {
@@ -253,7 +235,7 @@ window.ACTION_CATALOG = {
     keywords: ["腰", "臀", "桥式", "无力", "骨盆"],
     image: "assets/actions/glute_bridge.png",
     videoUrl: "",
-    videoHint: "B站搜索：臀桥训练 臀肌激活 康复",
+    videoHint: "",
     imageHint: "建议：侧面图，标出肩-髋-膝一线与臀部发力",
   },
   wall_squat: {
@@ -269,7 +251,7 @@ window.ACTION_CATALOG = {
     keywords: ["膝", "蹲", "股四头肌", "髌骨", "下楼"],
     image: "assets/actions/wall_squat.png",
     videoUrl: "",
-    videoHint: "B站搜索：靠墙静蹲 膝关节康复",
+    videoHint: "",
     imageHint: "建议：侧面图，标出膝不超过脚尖、背靠墙角度",
   },
   straight_leg_raise: {
@@ -284,7 +266,7 @@ window.ACTION_CATALOG = {
     keywords: ["膝", "直腿抬高", "股四头肌", "术后", "无力"],
     image: "assets/actions/straight_leg_raise.png",
     videoUrl: "",
-    videoHint: "B站搜索：直腿抬高 SLR 膝关节康复",
+    videoHint: "",
     imageHint: "建议：仰卧侧面图，标出抬腿约30°与膝伸直",
   },
   quad_set: {
@@ -300,7 +282,7 @@ window.ACTION_CATALOG = {
     keywords: ["膝", "股四头肌", "等长", "术后", "毛巾"],
     image: "assets/actions/quad_set.png",
     videoUrl: "",
-    videoHint: "B站搜索：股四头肌等长收缩 膝术后康复",
+    videoHint: "",
     imageHint: "建议：特写膝部与毛巾，标出大腿前侧绷紧下压",
   },
   calf_stretch: {
@@ -316,7 +298,7 @@ window.ACTION_CATALOG = {
     keywords: ["踝", "小腿", "跟腱", "拉伸", "脚跟"],
     image: "assets/actions/calf_stretch.png",
     videoUrl: "",
-    videoHint: "B站搜索：小腿后侧拉伸 跟腱 康复",
+    videoHint: "",
     imageHint: "建议：弓步拉墙侧面图，标出后脚跟着地与牵拉方向",
   },
   ankle_pump: {
@@ -332,7 +314,7 @@ window.ACTION_CATALOG = {
     keywords: ["踝", "踝泵", "肿胀", "术后", "久卧"],
     image: "assets/actions/ankle_pump.png",
     videoUrl: "",
-    videoHint: "B站搜索：踝泵运动 预防血栓 康复",
+    videoHint: "",
     imageHint: "建议：足部背伸/跖屈两帧对比示意图",
   },
   shoulder_pendulum: {
@@ -348,7 +330,7 @@ window.ACTION_CATALOG = {
     keywords: ["肩", "钟摆", "冻结肩", "活动度", "摆动"],
     image: "assets/actions/shoulder_pendulum.png",
     videoUrl: "",
-    videoHint: "B站搜索：肩关节钟摆运动 肩周炎康复",
+    videoHint: "",
     imageHint: "建议：体前屈侧面图，标出手臂自然下垂与摆动轨迹",
   },
   shoulder_external_rotation: {
@@ -364,7 +346,7 @@ window.ACTION_CATALOG = {
     keywords: ["肩", "外旋", "肩袖", "弹力带", "旋转"],
     image: "assets/actions/shoulder_external_rotation.png",
     videoUrl: "",
-    videoHint: "B站搜索：肩外旋训练 弹力带 肩袖康复",
+    videoHint: "",
     imageHint: "建议：正面图，标出肘贴身体与外旋角度",
   },
   mckenzie_press_up: {
@@ -380,7 +362,7 @@ window.ACTION_CATALOG = {
     keywords: ["腰", "麦肯基", "腰椎", "后伸", "突出"],
     image: "assets/actions/mckenzie_press_up.png",
     videoUrl: "",
-    videoHint: "B站搜索：麦肯基疗法 俯卧撑 腰椎",
+    videoHint: "",
     imageHint: "建议：侧面俯卧图，标出骨盆贴地与上半身撑起",
   },
 };
@@ -388,6 +370,7 @@ window.ACTION_CATALOG = {
 window.ACTION_NAME_TO_ID = Object.fromEntries(
   Object.values(window.ACTION_CATALOG).map((action) => [action.name, action.id])
 );
+window.ACTION_NAME_TO_ID["收下巴训练"] = "neck_chin_tuck";
 
 window.PAIN_REGIONS = ["颈部", "肩部", "腰部", "膝关节", "踝关节"];
 

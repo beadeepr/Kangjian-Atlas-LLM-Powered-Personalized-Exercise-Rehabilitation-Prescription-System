@@ -1,4 +1,4 @@
-﻿from pydantic import BaseModel
+from pydantic import BaseModel
 from datetime import date, datetime
 from typing import List, Optional
 
@@ -261,6 +261,20 @@ class KnowledgeQAResponse(BaseModel):
     references: List[KnowledgeArticleResponse]
     suggested_actions: List[dict]
     safety_notes: List[str]
+    rag_contexts: Optional[List[dict]] = None
+
+
+class RAGSearchRequest(BaseModel):
+    query: str
+    limit: Optional[int] = 5
+    body_regions: Optional[List[str]] = None
+    kind: Optional[str] = None
+
+
+class RAGSearchResponse(BaseModel):
+    provider: str
+    collection: str
+    results: List[dict]
 
 
 class PrescriptionRequest(BaseModel):
@@ -362,3 +376,231 @@ class PoseInferenceRequest(BaseModel):
 class PoseInferenceResponse(BaseModel):
     keypoints: List[List[float]]
     visibility: List[float]
+    voice_cue: Optional[dict] = None
+
+
+class VoiceCueRequest(BaseModel):
+    feedback: Optional[List[str]] = None
+    text: Optional[str] = None
+    status: Optional[str] = None
+    score: Optional[int] = None
+    enabled: Optional[bool] = True
+    voice: Optional[str] = None
+
+
+class VoiceCueResponse(BaseModel):
+    enabled: bool
+    text: str
+    ssml: Optional[str] = None
+    priority: str
+    voice: str
+    rate: float
+
+
+class PoseFrameRequest(BaseModel):
+    action_id: str
+    frame_id: Optional[str] = None
+    timestamp: Optional[int] = None
+    image_base64: Optional[str] = None
+    keypoints: Optional[List[List[float]]] = None
+    visibility: Optional[List[float]] = None
+
+
+class PoseFrameResponse(BaseModel):
+    frame_id: str
+    timestamp: int
+    keypoints: List[List[float]]
+    visibility: List[float]
+    skeleton_3d: Optional[dict] = None
+    ar_overlay: Optional[dict] = None
+    feedback: List[str]
+    score: Optional[int] = None
+    status: Optional[str] = None
+    provider: str
+    latency_ms: float
+    inference_latency_ms: Optional[float] = None
+    voice_cue: Optional[dict] = None
+
+
+class PoseBatchRequest(BaseModel):
+    session_id: Optional[str] = None
+    max_concurrency: Optional[int] = 2
+    frames: List[PoseFrameRequest]
+
+
+class PoseBatchResponse(BaseModel):
+    session_id: str
+    batch_size: int
+    latency_ms: float
+    results: List[PoseFrameResponse]
+
+
+class PoseStreamSessionResponse(BaseModel):
+    session_id: str
+    processed_frames: int
+    dropped_frames: int
+    last_latency_ms: Optional[float] = None
+
+
+class WebRTCOfferRequest(BaseModel):
+    sdp: str
+    type: str
+    action_id: Optional[str] = None
+
+
+class WebRTCOfferResponse(BaseModel):
+    sdp: Optional[str] = None
+    type: Optional[str] = None
+    status: str
+    detail: Optional[str] = None
+
+
+class SkeletonFrameRequest(BaseModel):
+    action_id: Optional[str] = None
+    keypoints: List[List[float]]
+    visibility: Optional[List[float]] = None
+
+
+class SkeletonFrameResponse(BaseModel):
+    skeleton_3d: dict
+
+
+class AROverlayRequest(BaseModel):
+    action_id: str
+    keypoints: List[List[float]]
+    visibility: Optional[List[float]] = None
+    feedback: Optional[List[str]] = None
+    status: Optional[str] = None
+    score: Optional[int] = None
+    viewport_width: Optional[int] = 720
+    viewport_height: Optional[int] = 1280
+    mirror: Optional[bool] = False
+
+
+class AROverlayResponse(BaseModel):
+    ar_overlay: dict
+
+
+class WearableMetricCreateRequest(BaseModel):
+    patient_profile_id: Optional[int] = None
+    training_checkin_id: Optional[int] = None
+    device_type: Optional[str] = None
+    heart_rate: Optional[int] = None
+    resting_heart_rate: Optional[int] = None
+    hrv_ms: Optional[int] = None
+    spo2: Optional[int] = None
+    steps: Optional[int] = None
+    calories: Optional[int] = None
+    skin_temperature_c: Optional[float] = None
+    perceived_exertion: Optional[int] = None
+    duration_minutes: Optional[int] = None
+    recorded_at: Optional[datetime] = None
+
+
+class WearableMetricResponse(BaseModel):
+    id: int
+    user_id: int
+    patient_profile_id: Optional[int] = None
+    training_checkin_id: Optional[int] = None
+    device_type: Optional[str] = None
+    heart_rate: Optional[int] = None
+    resting_heart_rate: Optional[int] = None
+    hrv_ms: Optional[int] = None
+    spo2: Optional[int] = None
+    steps: Optional[int] = None
+    calories: Optional[int] = None
+    skin_temperature_c: Optional[float] = None
+    perceived_exertion: Optional[int] = None
+    duration_minutes: Optional[int] = None
+    fatigue_score: int
+    risk_level: str
+    signals: List[str] = []
+    recommendation: Optional[str] = None
+    recorded_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+
+
+class FatigueStatusResponse(BaseModel):
+    latest: Optional[dict] = None
+    fatigue_score: int
+    risk_level: str
+    signals: Optional[List[str]] = []
+    recommendation: str
+    should_stop: bool
+    sample_count: int
+    averages: Optional[dict] = None
+
+
+class DoctorPatientLinkCreateRequest(BaseModel):
+    doctor_account: str
+    patient_profile_id: Optional[int] = None
+    patient_note: Optional[str] = None
+
+
+class DoctorPatientLinkResponse(BaseModel):
+    id: int
+    user_id: int
+    doctor_id: int
+    patient_profile_id: Optional[int] = None
+    status: str
+    patient_note: Optional[str] = None
+    doctor_note: Optional[str] = None
+    patient_name: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PrescriptionReviewShareRequest(BaseModel):
+    doctor_account: Optional[str] = None
+    doctor_id: Optional[int] = None
+    patient_note: Optional[str] = None
+
+
+class PrescriptionReviewUpdateRequest(BaseModel):
+    status: str
+    doctor_note: Optional[str] = None
+    risk_level: Optional[str] = None
+
+
+class PrescriptionReviewResponse(BaseModel):
+    id: int
+    prescription_id: int
+    user_id: int
+    doctor_id: int
+    patient_profile_id: Optional[int] = None
+    status: str
+    patient_note: Optional[str] = None
+    doctor_note: Optional[str] = None
+    risk_level: str
+    reviewed_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class PrescriptionAdjustmentCreateRequest(BaseModel):
+    reason: Optional[str] = None
+    summary: Optional[str] = None
+    action_changes: Optional[List[dict]] = None
+    adjusted_actions: Optional[List[dict]] = None
+
+
+class PrescriptionAdjustmentDecisionRequest(BaseModel):
+    decision: str
+
+
+class PrescriptionAdjustmentResponse(BaseModel):
+    id: int
+    review_id: Optional[int] = None
+    prescription_id: int
+    user_id: int
+    doctor_id: Optional[int] = None
+    source: str
+    status: str
+    reason: Optional[str] = None
+    summary: Optional[str] = None
+    action_changes: List[dict] = []
+    adjusted_actions: List[dict] = []
+    created_prescription_id: Optional[int] = None
+    decided_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None

@@ -11,20 +11,20 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR / "backend" / ".env")
 
-DOUBAO_API_KEY = os.getenv("DOUBAO_API_KEY")
-DOUBAO_BASE_URL = os.getenv("DOUBAO_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
-DOUBAO_MODEL_ID = os.getenv("DOUBAO_MODEL_ID")
+DeepSeek_API_KEY = os.getenv("DeepSeek_API_KEY")
+DeepSeek_BASE_URL = os.getenv("DeepSeek_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+DeepSeek_MODEL_ID = os.getenv("DeepSeek_MODEL_ID")
 
 
-class DoubaoError(Exception):
+class DeepSeekError(Exception):
     pass
 
 
 def _headers() -> dict[str, str]:
-    if not DOUBAO_API_KEY:
-        raise DoubaoError("Missing DOUBAO_API_KEY environment variable")
+    if not DeepSeek_API_KEY:
+        raise DeepSeekError("Missing DeepSeek_API_KEY environment variable")
     return {
-        "Authorization": f"Bearer {DOUBAO_API_KEY}",
+        "Authorization": f"Bearer {DeepSeek_API_KEY}",
         "Content-Type": "application/json",
     }
 
@@ -86,11 +86,11 @@ def _extract_json_object(text: str) -> Optional[dict[str, Any]]:
 
 
 def generate_with_http(prompt: str, model_id: Optional[str] = None, timeout: int = 30) -> dict[str, Any]:
-    model = model_id or DOUBAO_MODEL_ID
+    model = model_id or DeepSeek_MODEL_ID
     if not model:
-        raise DoubaoError("Missing DOUBAO_MODEL_ID (or model_id argument)")
+        raise DeepSeekError("Missing DeepSeek_MODEL_ID (or model_id argument)")
 
-    url = f"{DOUBAO_BASE_URL.rstrip('/')}/chat/completions"
+    url = f"{DeepSeek_BASE_URL.rstrip('/')}/chat/completions"
     payload = {
         "model": model,
         "messages": [
@@ -108,13 +108,13 @@ def generate_with_http(prompt: str, model_id: Optional[str] = None, timeout: int
         resp.raise_for_status()
     except requests.RequestException as exc:
         detail = getattr(exc.response, "text", str(exc))
-        raise DoubaoError(f"HTTP error from Doubao: {detail}") from exc
+        raise DeepSeekError(f"HTTP error from DeepSeek: {detail}") from exc
 
     resp.encoding = "utf-8"
     try:
         data = resp.json()
     except ValueError as exc:
-        raise DoubaoError("Doubao returned non-JSON response") from exc
+        raise DeepSeekError("DeepSeek returned non-JSON response") from exc
 
     text = _extract_chat_text(data)
     return {

@@ -1,12 +1,17 @@
 {
-  "generated_at": "2026-06-23T03:35:44.136099+00:00",
-  "total": 11,
-  "passed": 11,
+  "generated_at": "2026-06-24T02:20:53.675657+00:00",
+  "total": 16,
+  "passed": 16,
   "failed": 0,
   "status": "passed",
   "cases": [
     {
       "name": "健康检查",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "生产存储栈配置",
       "status": "passed",
       "detail": "通过"
     },
@@ -37,6 +42,26 @@
     },
     {
       "name": "实时动作纠正接口",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "RTMPose流式推理接口",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "3D骨骼与AR叠加服务",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "语音纠错与疲劳监测",
+      "status": "passed",
+      "detail": "通过"
+    },
+    {
+      "name": "医生协同与处方动态调整闭环",
       "status": "passed",
       "detail": "通过"
     },

@@ -3,7 +3,16 @@ uvicorn[standard]
 pydantic
 requests
 SQLAlchemy
+psycopg[binary]
+redis
+minio
 numpy
 python-dotenv
+langchain
+langchain-text-splitters
+langgraph
+chromadb
+qdrant-client
 onnxruntime
-opencv-python
+opencv-python-headless
+aiortc

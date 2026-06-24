@@ -15,7 +15,21 @@ def init_db():
     from .models import Base
 
     Base.metadata.create_all(bind=engine)
-    _ensure_sqlite_columns()
+    if is_sqlite_database():
+        _ensure_sqlite_columns()
+
+
+def is_sqlite_database() -> bool:
+    return SQLALCHEMY_DATABASE_URL.startswith("sqlite")
+
+
+def database_backend() -> dict:
+    url_prefix = SQLALCHEMY_DATABASE_URL.split(":", 1)[0]
+    return {
+        "driver": url_prefix,
+        "is_sqlite": is_sqlite_database(),
+        "url_configured": bool(os.getenv("DATABASE_URL")),
+    }
 
 
 def check_database() -> bool:

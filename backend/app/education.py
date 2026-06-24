@@ -104,12 +104,27 @@ def answer_knowledge_question(question: str, pain_regions: list[str] | None = No
         pain_regions=regions,
         limit=normalized_limit,
     )
+    try:
+        from .rag import retrieve_contexts
+
+        rag_contexts = retrieve_contexts(
+            query=question,
+            limit=normalized_limit,
+            body_regions=regions or None,
+        )
+    except Exception:
+        rag_contexts = []
     article_text = "；".join(article["summary"] for article in articles[:2])
     action_text = "、".join(action.name for action in suggested_actions[:3]) or "基础活动度训练"
     region_text = "、".join(regions) if regions else "相关部位"
+    context_text = ""
+    if rag_contexts:
+        context_text = " 检索到的康复知识提示：" + "；".join(
+            item.get("text", "")[:120] for item in rag_contexts[:2]
+        )
     answer = (
         f"根据本地康复知识库，你的问题主要关联 {region_text}。{article_text}"
-        f" 可优先参考 {action_text}，从低强度开始，训练前后记录 VAS 疼痛评分和完成情况。"
+        f"{context_text} 可优先参考 {action_text}，从低强度开始，训练前后记录 VAS 疼痛评分和完成情况。"
     )
     safety_notes = [
         "若出现剧烈疼痛、麻木无力、大小便异常、发热或症状快速加重，请停止训练并及时就医。",
@@ -120,4 +135,5 @@ def answer_knowledge_question(question: str, pain_regions: list[str] | None = No
         "references": articles,
         "suggested_actions": [_action_payload(action) for action in suggested_actions],
         "safety_notes": safety_notes,
+        "rag_contexts": rag_contexts,
     }

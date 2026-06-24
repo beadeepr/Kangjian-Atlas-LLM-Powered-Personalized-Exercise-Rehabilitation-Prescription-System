@@ -1,6 +1,7 @@
-﻿from fastapi import APIRouter, Depends, Header, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 from sqlalchemy.orm import Session
-from datetime import date, timedelta
+from fastapi import WebSocket, WebSocketDisconnect
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import base64
 import binascii
@@ -41,6 +42,10 @@ from .schema import (
     ActionUpdateRequest,
     AdminDashboardResponse,
     AdminUserSummary,
+    AROverlayRequest,
+    AROverlayResponse,
+    DoctorPatientLinkCreateRequest,
+    DoctorPatientLinkResponse,
     FeedbackCreateRequest,
     FeedbackResponse,
     FeedbackUpdateRequest,
@@ -53,12 +58,27 @@ from .schema import (
     PatientProfileCreateRequest,
     PatientProfileResponse,
     PatientProfileUpdateRequest,
+    PoseBatchRequest,
+    PoseBatchResponse,
     PoseCorrectionRequest,
     PoseCorrectionResponse,
+    PoseFrameRequest,
+    PoseFrameResponse,
+    PoseStreamSessionResponse,
+    PrescriptionAdjustmentCreateRequest,
+    PrescriptionAdjustmentDecisionRequest,
+    PrescriptionAdjustmentResponse,
     PoseInferenceRequest,
     PoseInferenceResponse,
     PrescriptionRequest,
     PrescriptionResponse,
+    PrescriptionReviewResponse,
+    PrescriptionReviewShareRequest,
+    PrescriptionReviewUpdateRequest,
+    RAGSearchRequest,
+    RAGSearchResponse,
+    SkeletonFrameRequest,
+    SkeletonFrameResponse,
     TrainingCheckinCreateRequest,
     TrainingCheckinResponse,
     TrainingCheckinUpdateRequest,
@@ -70,6 +90,13 @@ from .schema import (
     UserCreateRequest,
     UserLoginRequest,
     UserResponse,
+    FatigueStatusResponse,
+    VoiceCueRequest,
+    VoiceCueResponse,
+    WearableMetricCreateRequest,
+    WearableMetricResponse,
+    WebRTCOfferRequest,
+    WebRTCOfferResponse,
 )
 
 router = APIRouter()
@@ -170,11 +197,17 @@ def save_imaging_report_file(user_id: int, file_name: str | None, file_content_b
         raise HTTPException(status_code=400, detail="only png, jpg, jpeg, pdf, txt reports are supported")
 
     digest = hashlib.sha256(content).hexdigest()[:16]
-    upload_dir = Path(__file__).resolve().parents[1] / "uploads" / "imaging_reports" / str(user_id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    target = upload_dir / f"{digest}{extension}"
-    target.write_bytes(content)
-    return str(target.relative_to(Path(__file__).resolve().parents[1]))
+    content_types = {
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".pdf": "application/pdf",
+        ".txt": "text/plain; charset=utf-8",
+    }
+    object_name = f"imaging_reports/{user_id}/{digest}{extension}"
+    from .object_storage import save_object
+
+    return save_object(content, object_name, content_types.get(extension, "application/octet-stream"))
 
 
 def extract_text_report_content(file_name: str | None, file_content_base64: str | None) -> str | None:
@@ -511,6 +544,12 @@ def get_current_user(
 def get_admin_user(current_user=Depends(get_current_user)):
     if not is_admin_account(current_user):
         raise HTTPException(status_code=403, detail="admin permission required")
+    return current_user
+
+
+def get_doctor_user(current_user=Depends(get_current_user)):
+    if current_user.role not in {"doctor", "admin"}:
+        raise HTTPException(status_code=403, detail="doctor permission required")
     return current_user
 
 
@@ -1131,6 +1170,9 @@ def admin_create_action(req: ActionItem, current_user=Depends(get_admin_user)):
         action = create_action_payload(payload)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    from .cache import cache_delete
+
+    cache_delete("actions:v1")
     return action_item_from_payload(action)
 
 
@@ -1157,6 +1199,9 @@ def admin_update_action(action_id: str, req: ActionUpdateRequest, current_user=D
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not action:
         raise HTTPException(status_code=404, detail="Action not found")
+    from .cache import cache_delete
+
+    cache_delete("actions:v1")
     return action_item_from_payload(action)
 
 
@@ -1167,6 +1212,9 @@ def admin_delete_action(action_id: str, current_user=Depends(get_admin_user)):
     deleted = delete_action_payload(action_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Action not found")
+    from .cache import cache_delete
+
+    cache_delete("actions:v1")
     return {"message": "action deleted"}
 
 
@@ -1182,18 +1230,23 @@ def admin_test_report(current_user=Depends(get_admin_user)):
 
 @router.get("/deployment/info")
 def deployment_info():
-    from .database import check_database
-    from .doubao import DOUBAO_BASE_URL, DOUBAO_MODEL_ID
+    from .cache import check_redis
+    from .database import check_database, database_backend
+    from .doubao import DeepSeek_BASE_URL, DeepSeek_MODEL_ID
+    from .object_storage import check_object_storage
 
     return {
         "app": "康健图谱 API",
         "environment": os.getenv("APP_ENV", "development"),
         "demo_mode": os.getenv("DEMO_MODE", "false").lower() == "true",
         "database": "ok" if check_database() else "error",
+        "database_backend": database_backend(),
+        "redis": check_redis(),
+        "object_storage": check_object_storage(),
         "cors_origins_configured": bool(os.getenv("CORS_ORIGINS")),
-        "doubao_base_url": DOUBAO_BASE_URL,
-        "doubao_model_configured": bool(DOUBAO_MODEL_ID),
-        "doubao_api_key_configured": bool(os.getenv("DOUBAO_API_KEY")),
+        "deepseek_base_url": DeepSeek_BASE_URL,
+        "deepseek_model_configured": bool(DeepSeek_MODEL_ID),
+        "deepseek_api_key_configured": bool(os.getenv("DEEPSEEK_API_KEY") or os.getenv("DeepSeek_API_KEY")),
         "admin_accounts_configured": bool(os.getenv("ADMIN_ACCOUNTS")),
     }
 
@@ -1322,12 +1375,605 @@ def read_prescription(
 
 @router.post("/correct_pose", response_model=PoseCorrectionResponse)
 def correct_pose(req: PoseCorrectionRequest, db: Session = Depends(get_db)):
+    from .voice_feedback import build_voice_cue
+
     result = create_pose_feedback(db, req)
     return PoseCorrectionResponse(
         feedback=result["feedback"],
         score=result.get("score"),
         status=result.get("status"),
+        voice_cue=build_voice_cue(
+            result.get("feedback", []),
+            status=result.get("status"),
+            score=result.get("score"),
+        ),
     )
+
+
+def wearable_metric_response(metric):
+    from .fatigue import metric_to_dict
+
+    return WearableMetricResponse(**metric_to_dict(metric))
+
+
+def _pose_frame_from_request(req: PoseFrameRequest):
+    from .pose_runtime import PoseFrame
+    import uuid
+
+    return PoseFrame(
+        action_id=req.action_id,
+        frame_id=req.frame_id or str(uuid.uuid4()),
+        timestamp=req.timestamp,
+        image_base64=req.image_base64,
+        keypoints=req.keypoints,
+        visibility=req.visibility,
+    )
+
+
+@router.get("/pose/status")
+def pose_status(current_user=Depends(get_current_user)):
+    from .pose_runtime import pose_runtime_status
+
+    return pose_runtime_status()
+
+
+@router.post("/pose/stream/session", response_model=PoseStreamSessionResponse)
+def create_pose_stream_session(current_user=Depends(get_current_user)):
+    from .pose_runtime import stream_manager
+
+    session = stream_manager.create_session()
+    return PoseStreamSessionResponse(
+        session_id=session.session_id,
+        processed_frames=session.processed_frames,
+        dropped_frames=session.dropped_frames,
+        last_latency_ms=session.last_latency_ms,
+    )
+
+
+@router.delete("/pose/stream/session/{session_id}")
+def close_pose_stream_session(session_id: str, current_user=Depends(get_current_user)):
+    from .pose_runtime import stream_manager
+
+    stream_manager.close_session(session_id)
+    return {"message": "pose stream session closed"}
+
+
+@router.post("/pose/infer_frame", response_model=PoseFrameResponse)
+async def infer_pose_frame(req: PoseFrameRequest, current_user=Depends(get_current_user)):
+    from .pose_runtime import stream_manager
+
+    if not req.action_id:
+        raise HTTPException(status_code=400, detail="action_id required")
+    if not req.keypoints and not req.image_base64:
+        raise HTTPException(status_code=400, detail="keypoints or image_base64 required")
+    try:
+        result = await stream_manager.process_frame(_pose_frame_from_request(req))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return PoseFrameResponse(**result)
+
+
+@router.post("/pose/infer_batch", response_model=PoseBatchResponse)
+async def infer_pose_batch(req: PoseBatchRequest, current_user=Depends(get_current_user)):
+    from .pose_runtime import stream_manager
+
+    if not req.frames:
+        raise HTTPException(status_code=400, detail="frames required")
+    if len(req.frames) > 30:
+        raise HTTPException(status_code=400, detail="batch size cannot exceed 30")
+    session = stream_manager.get_session(req.session_id)
+    try:
+        batch = await stream_manager.process_batch(
+            [_pose_frame_from_request(frame) for frame in req.frames],
+            session=session,
+            max_concurrency=req.max_concurrency or 2,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    return PoseBatchResponse(session_id=session.session_id, **batch)
+
+
+@router.websocket("/pose/ws")
+async def pose_stream_websocket(websocket: WebSocket):
+    from .pose_runtime import PoseFrame, stream_manager
+
+    await websocket.accept()
+    session = stream_manager.create_session()
+    await websocket.send_json({"type": "session", "session_id": session.session_id})
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            if payload.get("type") == "close":
+                await websocket.send_json({"type": "closed", "session_id": session.session_id})
+                break
+            frame = PoseFrame(
+                action_id=payload.get("action_id") or "",
+                frame_id=payload.get("frame_id") or str(session.processed_frames + 1),
+                timestamp=payload.get("timestamp"),
+                image_base64=payload.get("image_base64"),
+                keypoints=payload.get("keypoints"),
+                visibility=payload.get("visibility"),
+            )
+            try:
+                result = await stream_manager.process_frame(frame, session=session)
+                await websocket.send_json({"type": "feedback", "session_id": session.session_id, **result})
+            except Exception as exc:
+                session.dropped_frames += 1
+                await websocket.send_json({"type": "error", "session_id": session.session_id, "detail": str(exc)})
+    except WebSocketDisconnect:
+        pass
+    finally:
+        stream_manager.close_session(session.session_id)
+
+
+@router.post("/pose/webrtc/offer", response_model=WebRTCOfferResponse)
+async def pose_webrtc_offer(req: WebRTCOfferRequest, current_user=Depends(get_current_user)):
+    try:
+        from aiortc import RTCPeerConnection, RTCSessionDescription
+    except Exception:
+        return WebRTCOfferResponse(
+            status="unavailable",
+            detail="aiortc is not installed. Install backend requirements and use WebSocket /api/pose/ws as fallback.",
+        )
+
+    peer = RTCPeerConnection()
+    offer = RTCSessionDescription(sdp=req.sdp, type=req.type)
+    await peer.setRemoteDescription(offer)
+    answer = await peer.createAnswer()
+    await peer.setLocalDescription(answer)
+    return WebRTCOfferResponse(
+        sdp=peer.localDescription.sdp,
+        type=peer.localDescription.type,
+        status="ready",
+    )
+
+
+@router.get("/visual/skeleton/spec")
+def visual_skeleton_spec(current_user=Depends(get_current_user)):
+    from .spatial import skeleton_spec
+
+    return skeleton_spec()
+
+
+@router.post("/visual/skeleton/frame", response_model=SkeletonFrameResponse)
+def visual_skeleton_frame(req: SkeletonFrameRequest, current_user=Depends(get_current_user)):
+    from .spatial import build_skeleton_frame
+
+    if not req.keypoints:
+        raise HTTPException(status_code=400, detail="keypoints required")
+    return SkeletonFrameResponse(
+        skeleton_3d=build_skeleton_frame(
+            req.keypoints,
+            req.visibility,
+            action_id=req.action_id,
+        )
+    )
+
+
+@router.post("/visual/ar/overlay", response_model=AROverlayResponse)
+def visual_ar_overlay(req: AROverlayRequest, current_user=Depends(get_current_user)):
+    from .spatial import build_ar_overlay
+
+    if not req.keypoints:
+        raise HTTPException(status_code=400, detail="keypoints required")
+    if req.viewport_width is not None and not 120 <= req.viewport_width <= 7680:
+        raise HTTPException(status_code=400, detail="viewport_width must be between 120 and 7680")
+    if req.viewport_height is not None and not 120 <= req.viewport_height <= 7680:
+        raise HTTPException(status_code=400, detail="viewport_height must be between 120 and 7680")
+    return AROverlayResponse(
+        ar_overlay=build_ar_overlay(
+            req.action_id,
+            req.keypoints,
+            visibility=req.visibility,
+            feedback=req.feedback,
+            status=req.status,
+            score=req.score,
+            viewport_width=req.viewport_width,
+            viewport_height=req.viewport_height,
+            mirror=bool(req.mirror),
+        )
+    )
+
+
+@router.post("/voice/cue", response_model=VoiceCueResponse)
+def create_voice_cue(req: VoiceCueRequest, current_user=Depends(get_current_user)):
+    from .voice_feedback import DEFAULT_VOICE, build_voice_cue
+
+    feedback = req.feedback if req.feedback is not None else req.text
+    cue = build_voice_cue(
+        feedback,
+        status=req.status,
+        score=req.score,
+        enabled=req.enabled if req.enabled is not None else True,
+        voice=req.voice or DEFAULT_VOICE,
+    )
+    return VoiceCueResponse(**cue)
+
+
+def _validate_wearable_payload(req: WearableMetricCreateRequest):
+    ranges = {
+        "heart_rate": (30, 220),
+        "resting_heart_rate": (30, 120),
+        "hrv_ms": (1, 250),
+        "spo2": (70, 100),
+        "steps": (0, 100000),
+        "calories": (0, 10000),
+        "perceived_exertion": (1, 10),
+        "duration_minutes": (0, 600),
+    }
+    data = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+    for field, (min_value, max_value) in ranges.items():
+        value = data.get(field)
+        if value is not None and not min_value <= value <= max_value:
+            raise HTTPException(status_code=400, detail=f"{field} must be between {min_value} and {max_value}")
+    if req.skin_temperature_c is not None and not 30 <= req.skin_temperature_c <= 43:
+        raise HTTPException(status_code=400, detail="skin_temperature_c must be between 30 and 43")
+
+
+@router.post("/wearables/metrics", response_model=WearableMetricResponse, status_code=201)
+def create_wearable_metric(
+    req: WearableMetricCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .fatigue import evaluate_fatigue
+
+    _validate_wearable_payload(req)
+    if req.patient_profile_id is not None:
+        validate_training_links(db, current_user.id, req.patient_profile_id, None)
+    if req.training_checkin_id is not None:
+        checkin = get_training_checkin(db, checkin_id=req.training_checkin_id, user_id=current_user.id)
+        if not checkin:
+            raise HTTPException(status_code=404, detail="Training checkin not found")
+
+    previous = (
+        db.query(models.WearableMetricModel)
+        .filter(models.WearableMetricModel.user_id == current_user.id)
+        .order_by(models.WearableMetricModel.recorded_at.desc())
+        .limit(20)
+        .all()
+    )
+    evaluation = evaluate_fatigue(
+        heart_rate=req.heart_rate,
+        resting_heart_rate=req.resting_heart_rate,
+        hrv_ms=req.hrv_ms,
+        spo2=req.spo2,
+        perceived_exertion=req.perceived_exertion,
+        duration_minutes=req.duration_minutes,
+        previous_metrics=previous,
+    )
+    metric = models.WearableMetricModel(
+        user_id=current_user.id,
+        patient_profile_id=req.patient_profile_id,
+        training_checkin_id=req.training_checkin_id,
+        device_type=req.device_type,
+        heart_rate=req.heart_rate,
+        resting_heart_rate=req.resting_heart_rate,
+        hrv_ms=req.hrv_ms,
+        spo2=req.spo2,
+        steps=req.steps,
+        calories=req.calories,
+        skin_temperature_c=req.skin_temperature_c,
+        perceived_exertion=req.perceived_exertion,
+        duration_minutes=req.duration_minutes,
+        fatigue_score=evaluation["fatigue_score"],
+        risk_level=evaluation["risk_level"],
+        signals=evaluation["signals"],
+        recommendation=evaluation["recommendation"],
+        recorded_at=req.recorded_at or datetime.utcnow(),
+    )
+    db.add(metric)
+    db.commit()
+    db.refresh(metric)
+    return wearable_metric_response(metric)
+
+
+@router.get("/wearables/metrics", response_model=list[WearableMetricResponse])
+def list_wearable_metrics(
+    patient_profile_id: int | None = None,
+    limit: int = 50,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    if limit < 1 or limit > 200:
+        raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
+    if patient_profile_id is not None:
+        validate_training_links(db, current_user.id, patient_profile_id, None)
+    query = db.query(models.WearableMetricModel).filter(models.WearableMetricModel.user_id == current_user.id)
+    if patient_profile_id is not None:
+        query = query.filter(models.WearableMetricModel.patient_profile_id == patient_profile_id)
+    metrics = query.order_by(models.WearableMetricModel.recorded_at.desc()).limit(limit).all()
+    return [wearable_metric_response(metric) for metric in metrics]
+
+
+@router.get("/wearables/fatigue/status", response_model=FatigueStatusResponse)
+def read_fatigue_status(
+    patient_profile_id: int | None = None,
+    window_minutes: int = 30,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .fatigue import summarize_recent_metrics
+
+    if window_minutes < 1 or window_minutes > 720:
+        raise HTTPException(status_code=400, detail="window_minutes must be between 1 and 720")
+    if patient_profile_id is not None:
+        validate_training_links(db, current_user.id, patient_profile_id, None)
+    query = db.query(models.WearableMetricModel).filter(models.WearableMetricModel.user_id == current_user.id)
+    if patient_profile_id is not None:
+        query = query.filter(models.WearableMetricModel.patient_profile_id == patient_profile_id)
+    metrics = query.order_by(models.WearableMetricModel.recorded_at.desc()).limit(100).all()
+    return FatigueStatusResponse(**summarize_recent_metrics(metrics, window_minutes=window_minutes))
+
+
+@router.post("/doctor_links", response_model=DoctorPatientLinkResponse, status_code=201)
+def create_doctor_link(
+    req: DoctorPatientLinkCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .collaboration import is_doctor, link_response
+
+    doctor = get_user_by_account(db, req.doctor_account.strip())
+    if not doctor or not is_doctor(doctor):
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    if req.patient_profile_id is not None:
+        validate_training_links(db, current_user.id, req.patient_profile_id, None)
+    existing = (
+        db.query(models.DoctorPatientLinkModel)
+        .filter(
+            models.DoctorPatientLinkModel.user_id == current_user.id,
+            models.DoctorPatientLinkModel.doctor_id == doctor.id,
+            models.DoctorPatientLinkModel.patient_profile_id == req.patient_profile_id,
+        )
+        .first()
+    )
+    if existing:
+        existing.status = "active"
+        existing.patient_note = req.patient_note
+        db.commit()
+        db.refresh(existing)
+        return DoctorPatientLinkResponse(**link_response(existing))
+    link = models.DoctorPatientLinkModel(
+        user_id=current_user.id,
+        doctor_id=doctor.id,
+        patient_profile_id=req.patient_profile_id,
+        patient_note=req.patient_note,
+        status="active",
+    )
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return DoctorPatientLinkResponse(**link_response(link))
+
+
+@router.get("/doctor/patients", response_model=list[DoctorPatientLinkResponse])
+def doctor_list_patients(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_doctor_user),
+):
+    from .collaboration import link_response
+
+    links = (
+        db.query(models.DoctorPatientLinkModel)
+        .filter(
+            models.DoctorPatientLinkModel.doctor_id == current_user.id,
+            models.DoctorPatientLinkModel.status == "active",
+        )
+        .order_by(models.DoctorPatientLinkModel.updated_at.desc())
+        .all()
+    )
+    return [DoctorPatientLinkResponse(**link_response(link)) for link in links]
+
+
+def _resolve_review_doctor(db: Session, req: PrescriptionReviewShareRequest):
+    from .collaboration import is_doctor
+
+    doctor = None
+    if req.doctor_id is not None:
+        doctor = db.query(models.UserModel).filter(models.UserModel.id == req.doctor_id).first()
+    elif req.doctor_account:
+        doctor = get_user_by_account(db, req.doctor_account.strip())
+    if not doctor or not is_doctor(doctor):
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    return doctor
+
+
+@router.post("/prescriptions/{prescription_id}/reviews/share", response_model=PrescriptionReviewResponse, status_code=201)
+def share_prescription_for_review(
+    prescription_id: int,
+    req: PrescriptionReviewShareRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .collaboration import doctor_patient_link_exists, review_response
+
+    prescription = get_prescription(db, prescription_id, user_id=current_user.id)
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+    doctor = _resolve_review_doctor(db, req)
+    if not doctor_patient_link_exists(db, doctor.id, current_user.id, prescription.patient_profile_id):
+        raise HTTPException(status_code=403, detail="doctor is not linked to this patient")
+    review = models.PrescriptionReviewModel(
+        prescription_id=prescription.id,
+        user_id=current_user.id,
+        doctor_id=doctor.id,
+        patient_profile_id=prescription.patient_profile_id,
+        status="pending",
+        patient_note=req.patient_note,
+        risk_level=(prescription.raw_response or {}).get("safety", {}).get("risk_level", "unknown"),
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+    return PrescriptionReviewResponse(**review_response(review))
+
+
+@router.get("/doctor/reviews", response_model=list[PrescriptionReviewResponse])
+def doctor_list_reviews(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_doctor_user),
+):
+    from .collaboration import review_response
+
+    query = db.query(models.PrescriptionReviewModel).filter(models.PrescriptionReviewModel.doctor_id == current_user.id)
+    if status:
+        query = query.filter(models.PrescriptionReviewModel.status == status)
+    reviews = query.order_by(models.PrescriptionReviewModel.updated_at.desc()).all()
+    return [PrescriptionReviewResponse(**review_response(review)) for review in reviews]
+
+
+@router.put("/doctor/reviews/{review_id}", response_model=PrescriptionReviewResponse)
+def doctor_update_review(
+    review_id: int,
+    req: PrescriptionReviewUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_doctor_user),
+):
+    from .collaboration import review_response
+
+    allowed = {"approved", "changes_requested", "reviewed"}
+    if req.status not in allowed:
+        raise HTTPException(status_code=400, detail="status must be approved, changes_requested or reviewed")
+    review = (
+        db.query(models.PrescriptionReviewModel)
+        .filter(
+            models.PrescriptionReviewModel.id == review_id,
+            models.PrescriptionReviewModel.doctor_id == current_user.id,
+        )
+        .first()
+    )
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    review.status = req.status
+    review.doctor_note = req.doctor_note
+    review.risk_level = req.risk_level or review.risk_level
+    review.reviewed_at = datetime.utcnow()
+    db.commit()
+    db.refresh(review)
+    return PrescriptionReviewResponse(**review_response(review))
+
+
+@router.post("/doctor/reviews/{review_id}/adjustments", response_model=PrescriptionAdjustmentResponse, status_code=201)
+def doctor_create_adjustment(
+    review_id: int,
+    req: PrescriptionAdjustmentCreateRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_doctor_user),
+):
+    from .collaboration import actions_for_prescription, adjustment_response, normalize_adjusted_actions
+
+    review = (
+        db.query(models.PrescriptionReviewModel)
+        .filter(
+            models.PrescriptionReviewModel.id == review_id,
+            models.PrescriptionReviewModel.doctor_id == current_user.id,
+        )
+        .first()
+    )
+    if not review:
+        raise HTTPException(status_code=404, detail="Review not found")
+    base_actions = actions_for_prescription(db, review.prescription_id)
+    adjusted_actions = req.adjusted_actions or normalize_adjusted_actions(base_actions, req.action_changes)
+    adjustment = models.PrescriptionAdjustmentModel(
+        review_id=review.id,
+        prescription_id=review.prescription_id,
+        user_id=review.user_id,
+        doctor_id=current_user.id,
+        source="doctor",
+        status="proposed",
+        reason=req.reason,
+        summary=req.summary or "医生基于处方审核提出调整建议。",
+        action_changes=req.action_changes or [],
+        adjusted_actions=adjusted_actions,
+    )
+    review.status = "changes_requested"
+    db.add(adjustment)
+    db.commit()
+    db.refresh(adjustment)
+    return PrescriptionAdjustmentResponse(**adjustment_response(adjustment))
+
+
+@router.post("/prescriptions/{prescription_id}/adjustments/auto", response_model=PrescriptionAdjustmentResponse, status_code=201)
+def create_auto_adjustment(
+    prescription_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .collaboration import adjustment_response, build_auto_adjustment
+
+    prescription = get_prescription(db, prescription_id, user_id=current_user.id)
+    if not prescription:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+    proposal = build_auto_adjustment(db, prescription)
+    adjustment = models.PrescriptionAdjustmentModel(
+        prescription_id=prescription.id,
+        user_id=current_user.id,
+        source="system",
+        status="proposed",
+        reason=proposal["reason"],
+        summary=proposal["summary"],
+        action_changes=proposal["action_changes"],
+        adjusted_actions=proposal["adjusted_actions"],
+    )
+    db.add(adjustment)
+    db.commit()
+    db.refresh(adjustment)
+    return PrescriptionAdjustmentResponse(**adjustment_response(adjustment))
+
+
+@router.get("/prescription_adjustments", response_model=list[PrescriptionAdjustmentResponse])
+def list_prescription_adjustments(
+    status: str | None = None,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .collaboration import adjustment_response
+
+    query = db.query(models.PrescriptionAdjustmentModel).filter(models.PrescriptionAdjustmentModel.user_id == current_user.id)
+    if status:
+        query = query.filter(models.PrescriptionAdjustmentModel.status == status)
+    adjustments = query.order_by(models.PrescriptionAdjustmentModel.updated_at.desc()).all()
+    return [PrescriptionAdjustmentResponse(**adjustment_response(item)) for item in adjustments]
+
+
+@router.post("/prescription_adjustments/{adjustment_id}/decision", response_model=PrescriptionAdjustmentResponse)
+def decide_prescription_adjustment(
+    adjustment_id: int,
+    req: PrescriptionAdjustmentDecisionRequest,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from .collaboration import adjustment_response, apply_adjustment
+
+    if req.decision not in {"apply", "reject"}:
+        raise HTTPException(status_code=400, detail="decision must be apply or reject")
+    adjustment = (
+        db.query(models.PrescriptionAdjustmentModel)
+        .filter(
+            models.PrescriptionAdjustmentModel.id == adjustment_id,
+            models.PrescriptionAdjustmentModel.user_id == current_user.id,
+        )
+        .first()
+    )
+    if not adjustment:
+        raise HTTPException(status_code=404, detail="Adjustment not found")
+    if adjustment.status != "proposed":
+        raise HTTPException(status_code=400, detail="adjustment already decided")
+    if req.decision == "reject":
+        adjustment.status = "rejected"
+        adjustment.decided_at = datetime.utcnow()
+        db.commit()
+        db.refresh(adjustment)
+        return PrescriptionAdjustmentResponse(**adjustment_response(adjustment))
+    apply_adjustment(db, adjustment)
+    db.refresh(adjustment)
+    return PrescriptionAdjustmentResponse(**adjustment_response(adjustment))
 
 
 @router.post("/infer_pose", response_model=PoseInferenceResponse)
@@ -1357,8 +2003,19 @@ def list_prescriptions(db: Session = Depends(get_db), current_user=Depends(get_c
 
 @router.get("/actions", response_model=list[ActionItem])
 def list_actions():
+    from .cache import cache_get_json, cache_set_json
     from .knowledge import load_action_library
-    return load_action_library()
+
+    cached = cache_get_json("actions:v1")
+    if cached:
+        return cached
+    actions = load_action_library()
+    cache_payload = [
+        action.model_dump() if hasattr(action, "model_dump") else action.dict()
+        for action in actions
+    ]
+    cache_set_json("actions:v1", cache_payload)
+    return actions
 
 
 @router.get("/knowledge/articles", response_model=KnowledgeArticleListResponse)
@@ -1371,6 +2028,40 @@ def list_knowledge_articles(
 
     return KnowledgeArticleListResponse(
         items=build_knowledge_articles(q=q, body_region=body_region, limit=limit)
+    )
+
+
+@router.get("/knowledge/rag/status")
+def knowledge_rag_status(current_user=Depends(get_current_user)):
+    from .rag import rag_status
+
+    return rag_status()
+
+
+@router.post("/knowledge/rag/reindex")
+def knowledge_rag_reindex(current_user=Depends(get_admin_user)):
+    from .rag import reindex_knowledge
+
+    return reindex_knowledge()
+
+
+@router.post("/knowledge/rag/search", response_model=RAGSearchResponse)
+def knowledge_rag_search(req: RAGSearchRequest, current_user=Depends(get_current_user)):
+    from .rag import rag_status, retrieve_contexts
+
+    if not req.query or not req.query.strip():
+        raise HTTPException(status_code=400, detail="query required")
+    status = rag_status()
+    results = retrieve_contexts(
+        query=req.query,
+        limit=req.limit or 5,
+        body_regions=req.body_regions,
+        kind=req.kind,
+    )
+    return RAGSearchResponse(
+        provider=status["provider"],
+        collection=status["collection"],
+        results=results,
     )
 
 
@@ -1389,10 +2080,10 @@ def ask_knowledge_question(req: KnowledgeQARequest):
     return KnowledgeQAResponse(**result)
 
 
-@router.post("/test_doubao")
-def test_doubao():
-    """Test Doubao API connection."""
-    from .doubao import generate_prescription_summary, DoubaoError
+@router.post("/test_deepseek")
+def test_deepseek():
+    """Test DeepSeek API connection."""
+    from .doubao import DeepSeekError, generate_prescription_summary
     try:
         result = generate_prescription_summary(
             patient_name="测试患者",
@@ -1407,5 +2098,11 @@ def test_doubao():
             mobility_score=5,
         )
         return {"status": "success", "summary": result}
-    except DoubaoError as exc:
+    except DeepSeekError as exc:
         return {"status": "error", "detail": str(exc)}
+
+
+@router.post("/test_doubao")
+def test_doubao():
+    """Backward-compatible alias for the DeepSeek API connection test."""
+    return test_deepseek()

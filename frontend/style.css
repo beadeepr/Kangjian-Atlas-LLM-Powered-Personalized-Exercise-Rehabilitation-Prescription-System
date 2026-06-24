@@ -1,3 +1,8 @@
+/* Ensure [hidden] always wins over class-level display rules */
+[hidden] {
+  display: none !important;
+}
+
 :root {
   --primary: #1a73e8;
   --primary-dark: #1558b0;

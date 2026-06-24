@@ -1,59 +1,72 @@
-# 部署说明与线上演示环境
+# 部署说明与生产存储栈
 
-## 后端环境变量
+## 环境变量
 
-复制 `.env.sample` 为 `.env`，并按部署环境填写：
+复制 `.env.sample` 为 `.env`，按部署环境填写：
 
 ```env
 APP_ENV=production
 DEMO_MODE=false
 CORS_ORIGINS=https://your-frontend.example.com
-DATABASE_URL=sqlite:///backend/database.db
-DOUBAO_API_KEY=your_api_key
-DOUBAO_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-DOUBAO_MODEL_ID=your_model_id
+DATABASE_URL=postgresql+psycopg://kangjian:kangjian_password@postgres:5432/kangjian_atlas
+REDIS_URL=redis://redis:6379/0
+OBJECT_STORAGE_BACKEND=minio
+MINIO_ENDPOINT=minio:9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=kangjian-atlas
+MINIO_SECURE=false
+DeepSeek_API_KEY=your_api_key
+DeepSeek_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+DeepSeek_MODEL_ID=your_model_id
 JWT_SECRET=change_this_to_a_long_random_secret
 JWT_EXPIRE_SECONDS=604800
 ADMIN_ACCOUNTS=admin
+DOCTOR_ACCOUNTS=doctor
 ```
 
 说明：
 
-- `CORS_ORIGINS` 用英文逗号分隔多个前端地址。
-- `DATABASE_URL` 默认使用 SQLite；线上演示可挂载 `backend/database.db` 或替换为其他 SQLAlchemy 数据库地址。
-- `JWT_SECRET` 必须改为较长随机字符串。
-- `.env` 不提交到 GitHub。
-- 豆包配置缺失时，处方生成会走本地兜底摘要，演示流程不会中断。
+- `DATABASE_URL` 支持 SQLAlchemy 地址。开发默认可继续使用 SQLite，生产建议使用 PostgreSQL。
+- `REDIS_URL` 为空时 Redis 缓存自动禁用；配置后用于热点数据缓存和健康检查。
+- `OBJECT_STORAGE_BACKEND=local` 时上传文件写入本地 `backend/uploads`；设置为 `minio` 后写入 MinIO bucket。
+- `.env` 不要提交到 GitHub。
 
-## 本地生产方式启动
+## Docker Compose 启动
 
-在项目根目录执行：
+项目根目录执行：
+
+```powershell
+docker compose up --build
+```
+
+默认服务：
+
+```text
+API: http://localhost:8000
+PostgreSQL: localhost:5432
+Redis: localhost:6379
+MinIO API: http://localhost:9000
+MinIO Console: http://localhost:9001
+```
+
+MinIO 默认账号密码来自 `docker-compose.yml`：`minioadmin / minioadmin`。生产环境请改成强密码。
+
+## 本地开发启动
+
+只使用 SQLite 和本地文件存储时：
 
 ```powershell
 .\backend\start_server.ps1
 ```
 
-默认监听：
-
-```text
-http://localhost:8000
-```
-
-## Docker 部署
-
-构建镜像：
+或直接运行：
 
 ```powershell
-docker build -f backend/Dockerfile -t kangjian-atlas-backend .
+.\.venv\Scripts\uvicorn.exe app.main:app --app-dir backend --reload
 ```
 
-运行容器：
-
-```powershell
-docker run --rm -p 8000:8000 --env-file .env kangjian-atlas-backend
-```
-
-## 线上演示检查接口
+## 验证接口
 
 健康检查：
 
@@ -73,29 +86,23 @@ GET /ready
 GET /api/deployment/info
 ```
 
-该接口不会返回 API Key 或 JWT Secret，只返回配置是否存在和数据库状态。
+`/ready` 和 `/api/deployment/info` 会返回数据库、Redis、对象存储状态，但不会返回 API Key 或 JWT Secret。
 
-## 演示账号建议
-
-1. 注册普通用户账号，用于患者端演示。
-2. 注册 `admin` 账号或在 `.env` 中设置 `ADMIN_ACCOUNTS`，用于管理员知识库维护演示。
-3. 先运行自动化测试脚本生成报告：
+## 自动化测试
 
 ```powershell
 .\.venv\Scripts\python.exe backend\run_backend_tests.py
 ```
 
-然后通过管理员接口读取：
+测试报告会写入：
+
+```text
+backend/reports/backend_test_report.md
+backend/reports/backend_test_report.json
+```
+
+管理员登录后也可以读取：
 
 ```text
 GET /api/admin/test_report
 ```
-
-## 部署后验证流程
-
-1. 访问 `/health`，确认返回 `{"status":"ok"}`。
-2. 访问 `/ready`，确认数据库状态为 `ok`。
-3. 访问 `/api/deployment/info`，确认豆包、CORS、环境配置状态。
-4. 注册/登录用户，生成一条康复处方。
-5. 导出处方，验证 `/api/prescriptions/{id}/export?format=md`。
-6. 登录管理员账号，验证 `/api/admin/actions`。

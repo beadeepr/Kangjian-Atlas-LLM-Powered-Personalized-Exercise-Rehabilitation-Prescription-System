@@ -568,12 +568,90 @@ async function parseApiError(response) {
 }
 
 function formatSummary(summary) {
-  return summary
+  const text = normalizeSummaryText(summary);
+  return text
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => `<p>${line}</p>`)
+    .map((line) => `<p>${escapeAdminText(line)}</p>`)
     .join("");
+}
+
+function normalizeSummaryText(summary, _depth) {
+  if (_depth > 3) return "";
+  const depth = (_depth || 0) + 1;
+
+  if (summary == null) return "";
+
+  if (typeof summary === "string") {
+    const trimmed = summary.trim();
+    if (!trimmed) return "";
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        const text = normalizeSummaryText(parsed, depth);
+        return text || trimmed;
+      } catch {
+        return trimmed;
+      }
+    }
+    return trimmed;
+  }
+
+  if (Array.isArray(summary)) {
+    return summary
+      .map((item) => normalizeSummaryText(item, depth))
+      .filter(Boolean)
+      .join("；");
+  }
+
+  if (typeof summary === "object") {
+    const lines = [];
+    const appendLine = (label, value) => {
+      if (value == null || value === "") return;
+      if (typeof value === "object") {
+        const inner = normalizeSummaryText(value, depth);
+        if (inner) lines.push(label ? `${label}${inner}` : inner);
+        return;
+      }
+      const text = String(value).trim();
+      if (text && text !== "[object Object]")
+        lines.push(label ? `${label}${text}` : text);
+    };
+
+    const KNOWN_KEYS = [
+      ["summary", ""],
+      ["text", ""],
+      ["content", ""],
+      ["warnings", "注意事项："],
+      ["warning", "注意事项："],
+      ["follow_up", "随访建议："],
+      ["followUp", "随访建议："],
+      ["recommendation", "建议："],
+      ["recommendations", "建议："],
+    ];
+
+    let matched = false;
+    for (const [key, label] of KNOWN_KEYS) {
+      if (summary[key] != null) {
+        appendLine(label, summary[key]);
+        matched = true;
+      }
+    }
+
+    if (!matched) {
+      for (const value of Object.values(summary)) {
+        if (typeof value === "string") {
+          const text = value.trim();
+          if (text && text !== "[object Object]") lines.push(text);
+        }
+      }
+    }
+
+    return lines.join("\n");
+  }
+
+  return String(summary).trim();
 }
 
 function showDoubaoResult(content) {
@@ -1435,12 +1513,13 @@ function handleActionImageError(img) {
 }
 window.handleActionImageError = handleActionImageError;
 
+function isValidVideoUrl(url) {
+  return typeof url === "string" && url.startsWith("http");
+}
+
 function renderActionVideoMarkup(action) {
-  if (action.videoUrl) {
-    return `<a class="action-video-link" href="${action.videoUrl}" target="_blank" rel="noopener noreferrer">观看示范视频</a>`;
-  }
-  if (action.videoHint) {
-    return `<p class="hint action-video-hint"><strong>示范视频：</strong>${action.videoHint}</p>`;
+  if (isValidVideoUrl(action.videoUrl)) {
+    return `<button class="btn btn-secondary btn-small action-video-btn" type="button" data-video-url="${escapeAdminText(action.videoUrl)}">▶ 观看示范视频</button>`;
   }
   return "";
 }
@@ -1737,18 +1816,18 @@ function showDemo(action) {
   }
 
   if (videoWrap && videoLink && videoHintEl) {
-    if (action.videoUrl) {
-      videoLink.href = action.videoUrl;
+    if (isValidVideoUrl(action.videoUrl)) {
+      videoLink.href = "#";
+      videoLink.dataset.videoUrl = action.videoUrl;
       videoLink.hidden = false;
       videoHintEl.textContent = "";
       videoHintEl.hidden = true;
       videoWrap.hidden = false;
-    } else if (action.videoHint) {
-      videoLink.hidden = true;
-      videoHintEl.textContent = action.videoHint;
-      videoHintEl.hidden = false;
-      videoWrap.hidden = false;
     } else {
+      delete videoLink.dataset.videoUrl;
+      videoLink.removeAttribute("href");
+      videoLink.hidden = true;
+      videoHintEl.hidden = true;
       videoWrap.hidden = true;
     }
   }
@@ -2105,6 +2184,23 @@ function bindEvents() {
   });
   document.getElementById("complete-training").addEventListener("click", completeTraining);
   els.logoutButton?.addEventListener("click", logoutSession);
+
+  document.addEventListener("click", (event) => {
+    const btn = event.target.closest(".action-video-btn, #demo-video-link[data-video-url]");
+    if (!btn) return;
+    event.preventDefault();
+    const url = btn.dataset.videoUrl;
+    if (!url) return;
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(() => {
+        showToast("视频链接已复制，请在浏览器中打开");
+      }).catch(() => {
+        showToast(`请复制此链接到浏览器打开：${url}`);
+      });
+    } else {
+      showToast(`请复制此链接到浏览器打开：${url}`);
+    }
+  });
   els.stepButtons().forEach((button) => {
     button.addEventListener("click", () => {
       if (button.disabled) return;
