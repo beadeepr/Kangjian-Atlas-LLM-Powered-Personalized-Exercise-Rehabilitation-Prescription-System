@@ -1,4 +1,4 @@
-﻿from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session
 from . import models, schema
 import base64
 import hashlib
@@ -337,7 +337,12 @@ def create_prescription(
     user_id: int | None = None,
     patient_profile_id: int | None = None,
 ):
-    from .knowledge import load_prompt_template, render_prescription_summary, select_actions_for_prescription
+    from .knowledge import (
+        load_prompt_template,
+        normalize_prescription_summary,
+        render_prescription_summary,
+        select_actions_for_prescription,
+    )
     from .doubao import generate_prescription_summary
     from .rag import contexts_to_prompt, retrieve_contexts
     from .safety import evaluate_prescription_safety
@@ -381,8 +386,7 @@ def create_prescription(
         prompt_template=prompt_template.replace("{rag_contexts}", rag_prompt_context or "暂无额外检索上下文"),
     )
     parsed = result.get("json") if isinstance(result, dict) else None
-    model_summary = parsed.get("summary") if isinstance(parsed, dict) else None
-    summary = model_summary or result.get("text") or render_prescription_summary(
+    fallback_summary = render_prescription_summary(
         name=prescription.name,
         age=prescription.age,
         symptoms=prescription.symptoms,
@@ -390,6 +394,7 @@ def create_prescription(
         actions=selected_actions,
         mobility_score=prescription.mobility_score,
     )
+    summary = normalize_prescription_summary(result, fallback_summary)
     raw_response = {
         "model_text": result.get("text"),
         "model_json": parsed,

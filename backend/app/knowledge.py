@@ -1,4 +1,4 @@
-﻿import json
+import json
 from pathlib import Path
 from typing import List, Optional
 from .action_metadata import enrich_action_payload
@@ -23,6 +23,11 @@ REGION_HINTS = {
     "膝关节": ["膝", "髌骨", "蹲", "下楼", "跑步"],
     "踝关节": ["踝", "脚跟", "小腿", "跟腱", "肿胀"],
 }
+
+SIMILAR_ACTION_GROUPS = [
+    frozenset({"neck_chin_tuck", "chin_tuck"}),
+    frozenset({"bird_dog", "dead_bug"}),
+]
 
 
 def load_action_catalog() -> List[dict]:
@@ -145,6 +150,73 @@ def _score_action(
     return score
 
 
+def dedupe_similar_actions(actions: List[ActionItem]) -> List[ActionItem]:
+    kept: List[ActionItem] = []
+    used_groups: set[frozenset[str]] = set()
+    for action in actions:
+        group = next((item for item in SIMILAR_ACTION_GROUPS if action.id in item), None)
+        if group:
+            if group in used_groups:
+                continue
+            used_groups.add(group)
+        kept.append(action)
+    return kept
+
+
+def _append_summary_lines(lines: List[str], label: str, value) -> None:
+    if value is None:
+        return
+    if isinstance(value, str):
+        text = value.strip()
+        if text:
+            lines.append(f"{label}{text}" if label else text)
+        return
+    if isinstance(value, list):
+        items = [str(item).strip() for item in value if str(item).strip()]
+        if items:
+            lines.append(f"{label}{'；'.join(items)}")
+        return
+    if isinstance(value, dict):
+        for item in value.values():
+            _append_summary_lines(lines, label, item)
+        return
+    text = str(value).strip()
+    if text:
+        lines.append(f"{label}{text}" if label else text)
+
+
+def _summary_from_payload(payload: dict) -> Optional[str]:
+    lines: List[str] = []
+    _append_summary_lines(lines, "", payload.get("summary"))
+    _append_summary_lines(lines, "注意事项：", payload.get("warnings"))
+    _append_summary_lines(lines, "随访建议：", payload.get("follow_up"))
+    return "\n".join(lines).strip() or None
+
+
+def normalize_prescription_summary(result: Optional[dict], fallback: str) -> str:
+    parsed = result.get("json") if isinstance(result, dict) else None
+    if isinstance(parsed, dict):
+        text = _summary_from_payload(parsed)
+        if text:
+            return text
+
+    raw_text = result.get("text") if isinstance(result, dict) else None
+    if isinstance(raw_text, str) and raw_text.strip():
+        stripped = raw_text.strip()
+        if stripped.startswith("{"):
+            from .doubao import _extract_json_object
+
+            nested = _extract_json_object(stripped)
+            if isinstance(nested, dict):
+                text = _summary_from_payload(nested)
+                if text:
+                    return text
+            return fallback
+        return stripped
+
+    return fallback
+
+
 def select_actions_for_prescription(
     symptoms: str,
     pain_regions: Optional[List[str]] = None,
@@ -189,9 +261,9 @@ def select_actions_for_prescription(
             payload["sets"] = max(2, (action.sets or 3) - 1)
             payload["reps"] = max(1, action.reps or 1)
             adjusted.append(ActionItem(**payload))
-        return adjusted[:max_actions]
+        return dedupe_similar_actions(adjusted[:max_actions])
 
-    return selected[:max_actions]
+    return dedupe_similar_actions(selected[:max_actions])
 
 
 def select_actions_for_request(
