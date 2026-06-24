@@ -1229,7 +1229,7 @@ def admin_test_report(current_user=Depends(get_admin_user)):
 def deployment_info():
     from .cache import check_redis
     from .database import check_database, database_backend
-    from .doubao import DEEPSEEK_BASE_URL, DEEPSEEK_MODEL_ID
+    from .doubao import DeepSeek_BASE_URL, DeepSeek_MODEL_ID
     from .object_storage import check_object_storage
 
     return {
@@ -1241,8 +1241,8 @@ def deployment_info():
         "redis": check_redis(),
         "object_storage": check_object_storage(),
         "cors_origins_configured": bool(os.getenv("CORS_ORIGINS")),
-        "deepseek_base_url": DEEPSEEK_BASE_URL,
-        "deepseek_model_configured": bool(DEEPSEEK_MODEL_ID),
+        "deepseek_base_url": DeepSeek_BASE_URL,
+        "deepseek_model_configured": bool(DeepSeek_MODEL_ID),
         "deepseek_api_key_configured": bool(os.getenv("DEEPSEEK_API_KEY") or os.getenv("DeepSeek_API_KEY")),
         "admin_accounts_configured": bool(os.getenv("ADMIN_ACCOUNTS")),
     }
