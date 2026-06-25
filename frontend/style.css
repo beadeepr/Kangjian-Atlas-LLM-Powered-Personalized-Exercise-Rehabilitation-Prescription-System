@@ -1800,6 +1800,330 @@ textarea {
   }
 }
 
+/* M7 Knowledge page */
+.knowledge-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.knowledge-tab {
+  border: 1px solid rgba(26, 115, 232, 0.18);
+  background: rgba(255, 255, 255, 0.92);
+  color: #102a56;
+  border-radius: 999px;
+  padding: 8px 16px;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.knowledge-tab.active {
+  background: #1a73e8;
+  border-color: #1a73e8;
+  color: #fff;
+}
+
+.knowledge-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin-bottom: 16px;
+}
+
+.knowledge-filter {
+  display: grid;
+  gap: 6px;
+  font-size: 0.88rem;
+  color: #102a56;
+  min-width: 160px;
+}
+
+.knowledge-filter input,
+.knowledge-filter select {
+  width: 100%;
+}
+
+.knowledge-articles-list,
+.knowledge-prevention-list {
+  display: grid;
+  gap: 12px;
+}
+
+.knowledge-article-card {
+  border: 1px solid rgba(26, 115, 232, 0.12);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  overflow: hidden;
+}
+
+.knowledge-article-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 16px;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.knowledge-article-head h3 {
+  margin: 4px 0 0;
+  font-size: 1rem;
+  color: #102a56;
+}
+
+.knowledge-category {
+  display: inline-block;
+  font-size: 0.78rem;
+  color: #1a73e8;
+  background: rgba(26, 115, 232, 0.08);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.knowledge-expand-icon {
+  font-size: 1.2rem;
+  color: #5f7ea8;
+  flex-shrink: 0;
+}
+
+.knowledge-article-body {
+  padding: 0 16px 16px;
+  color: #334155;
+  font-size: 0.92rem;
+}
+
+.knowledge-article-body h4 {
+  margin: 12px 0 6px;
+  font-size: 0.88rem;
+  color: #102a56;
+}
+
+.knowledge-prevention-card h3 {
+  margin: 0 0 6px;
+  color: #102a56;
+}
+
+.prevention-tips-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  color: #334155;
+}
+
+.knowledge-qa-card {
+  padding: 18px 20px;
+}
+
+.knowledge-disclaimer {
+  margin-top: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: rgba(251, 188, 5, 0.12);
+  border: 1px solid rgba(251, 188, 5, 0.28);
+}
+
+.knowledge-qa-result {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed rgba(26, 115, 232, 0.16);
+}
+
+.knowledge-qa-answer h3,
+.knowledge-qa-refs h4,
+.knowledge-qa-actions h4,
+.knowledge-qa-safety h4 {
+  margin: 0 0 8px;
+  color: #102a56;
+  font-size: 0.92rem;
+}
+
+.knowledge-qa-safety ul {
+  color: #b45309;
+}
+
+/* Prescription feedback */
+.prescription-feedback-card {
+  margin-top: 20px;
+  padding: 18px 20px;
+}
+
+.prescription-feedback-card h3 {
+  margin: 0 0 8px;
+  color: #102a56;
+}
+
+.feedback-rating-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.feedback-rating-label {
+  font-size: 0.88rem;
+  color: #102a56;
+}
+
+.star-rating {
+  display: flex;
+  gap: 4px;
+}
+
+.star-btn {
+  border: 0;
+  background: transparent;
+  font-size: 1.4rem;
+  color: #cbd5e1;
+  cursor: pointer;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.star-btn.active {
+  color: #f59e0b;
+}
+
+/* M8 Admin extensions */
+.admin-table-wrap {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.admin-table th,
+.admin-table td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(26, 115, 232, 0.1);
+  text-align: left;
+  vertical-align: top;
+}
+
+.admin-table th {
+  color: #5f7ea8;
+  font-weight: 600;
+}
+
+.admin-feedback-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-feedback-card {
+  border: 1px solid rgba(26, 115, 232, 0.12);
+  border-radius: 14px;
+  padding: 14px 16px;
+  background: rgba(250, 252, 255, 0.92);
+}
+
+.admin-feedback-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.admin-feedback-meta {
+  display: block;
+  font-size: 0.82rem;
+  color: #5f7ea8;
+  margin-top: 4px;
+}
+
+.admin-feedback-status {
+  font-size: 0.78rem;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(26, 115, 232, 0.08);
+  color: #1a73e8;
+  white-space: nowrap;
+}
+
+.admin-feedback-status.status-open {
+  background: rgba(251, 188, 5, 0.15);
+  color: #b45309;
+}
+
+.admin-feedback-status.status-resolved,
+.admin-feedback-status.status-closed {
+  background: rgba(52, 168, 83, 0.12);
+  color: #15803d;
+}
+
+.admin-feedback-update-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: end;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed rgba(26, 115, 232, 0.12);
+}
+
+#admin-dashboard-section,
+#admin-users-section,
+#admin-feedback-section {
+  scroll-margin-top: 120px;
+}
+
+/* Notice cards (demo mode + load error with retry) */
+.notice-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--border-soft);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.notice-card .notice-icon {
+  font-size: 1.6rem;
+  flex-shrink: 0;
+}
+
+.notice-card .notice-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.notice-card .notice-body h3 {
+  margin: 0 0 4px;
+  font-size: 1rem;
+  color: #102a56;
+}
+
+.notice-card .notice-body p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.demo-notice {
+  background: linear-gradient(135deg, rgba(25, 182, 163, 0.08), rgba(26, 115, 232, 0.06));
+  border-color: rgba(25, 182, 163, 0.25);
+}
+
+.error-notice {
+  background: rgba(251, 188, 5, 0.08);
+  border-color: rgba(251, 188, 5, 0.28);
+}
+
+.error-notice .notice-body p {
+  color: #92600a;
+}
+
 .training-stats-panel h3 {
   margin: 0 0 8px;
   font-size: 1rem;

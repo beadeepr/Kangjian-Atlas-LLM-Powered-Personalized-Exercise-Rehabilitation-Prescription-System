@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>康健图谱 - 个性化运动康复处方</title>
-    <link rel="stylesheet" href="style.css?v=20260624g" />
+    <link rel="stylesheet" href="style.css?v=20260625b" />
   </head>
   <body>
     <header class="app-header">
@@ -27,6 +27,7 @@
         <button class="btn btn-secondary btn-small" id="go-profiles" type="button" hidden>健康档案</button>
         <button class="btn btn-secondary btn-small" id="go-library" type="button" hidden>动作库</button>
         <button class="btn btn-secondary btn-small" id="go-progress" type="button" hidden>康复进度</button>
+        <button class="btn btn-secondary btn-small" id="go-knowledge" type="button" hidden>知识科普</button>
         <button class="btn btn-secondary btn-small dev-only" id="test-doubao" type="button">测试 DeepSeek</button>
         <button class="btn btn-secondary btn-small" id="go-admin" type="button" hidden>管理后台</button>
         <button class="btn btn-secondary btn-small" id="logout-button" type="button" hidden>退出登录</button>
@@ -259,6 +260,30 @@
         </div>
 
         <div id="action-list" class="action-grid"></div>
+
+        <div class="card prescription-feedback-card" id="prescription-feedback-card" hidden>
+          <h3>处方满意度反馈</h3>
+          <p class="hint">您的评价将帮助我们持续改进康复处方质量。</p>
+          <form id="prescription-feedback-form" class="feedback-form" novalidate>
+            <div class="feedback-rating-row">
+              <span class="feedback-rating-label">满意度评分</span>
+              <div class="star-rating" id="feedback-star-rating" role="radiogroup" aria-label="满意度评分">
+                <button class="star-btn" type="button" data-rating="1" aria-label="1星">★</button>
+                <button class="star-btn" type="button" data-rating="2" aria-label="2星">★</button>
+                <button class="star-btn" type="button" data-rating="3" aria-label="3星">★</button>
+                <button class="star-btn" type="button" data-rating="4" aria-label="4星">★</button>
+                <button class="star-btn" type="button" data-rating="5" aria-label="5星">★</button>
+              </div>
+              <input type="hidden" id="feedback-rating-value" name="rating" value="" />
+            </div>
+            <label class="field field-full">反馈内容
+              <textarea id="feedback-content" name="content" rows="3" placeholder="请描述处方是否清晰、动作是否合适…" required></textarea>
+            </label>
+            <div class="form-actions">
+              <button class="btn btn-primary btn-small" type="submit">提交反馈</button>
+            </div>
+          </form>
+        </div>
 
         <div class="page-actions">
           <button class="btn btn-secondary" id="back-to-intake" type="button">返回修改</button>
@@ -532,12 +557,59 @@
         </div>
       </section>
 
+      <section id="page-knowledge" class="page" aria-labelledby="knowledge-title">
+        <div class="page-head">
+          <h2 id="knowledge-title">康复知识科普</h2>
+          <p>浏览常见伤病解读与预防保健建议，或通过 RAG 智能问答获取康复指导。</p>
+        </div>
+        <nav class="knowledge-tabs" id="knowledge-tabs" role="tablist" aria-label="知识科普分类">
+          <button class="knowledge-tab active" type="button" data-knowledge-tab="articles" role="tab" aria-selected="true">康复百科</button>
+          <button class="knowledge-tab" type="button" data-knowledge-tab="prevention" role="tab" aria-selected="false">预防保健</button>
+          <button class="knowledge-tab" type="button" data-knowledge-tab="qa" role="tab" aria-selected="false">康复问答</button>
+        </nav>
+        <div class="knowledge-panel" id="knowledge-articles-panel">
+          <div class="knowledge-toolbar card">
+            <label class="knowledge-filter">关键词<input id="knowledge-filter-q" type="search" placeholder="伤病类型、部位…" /></label>
+            <label class="knowledge-filter">部位<select id="knowledge-filter-region"><option value="">全部部位</option></select></label>
+            <button class="btn btn-secondary btn-small" id="refresh-knowledge" type="button">刷新</button>
+          </div>
+          <div id="knowledge-articles-list" class="knowledge-articles-list">正在加载…</div>
+        </div>
+        <div class="knowledge-panel" id="knowledge-prevention-panel" hidden>
+          <div id="knowledge-prevention-list" class="knowledge-prevention-list">正在加载…</div>
+        </div>
+        <div class="knowledge-panel" id="knowledge-qa-panel" hidden>
+          <div class="card knowledge-qa-card">
+            <p class="hint knowledge-disclaimer">⚠️ 科普问答仅供参考，不能替代医生诊断。如有红旗症状请及时就医。</p>
+            <form id="knowledge-qa-form" class="knowledge-qa-form" novalidate>
+              <label class="field field-full">您的问题
+                <textarea id="knowledge-question" rows="3" placeholder="例如：颈椎生理曲度变直可以跑步吗？" required></textarea>
+              </label>
+              <fieldset class="field field-full pain-field">
+                <legend>关联疼痛部位（可选）</legend>
+                <div class="chip-group" id="knowledge-pain-regions"></div>
+              </fieldset>
+              <div class="form-actions">
+                <button class="btn btn-primary" id="knowledge-qa-submit" type="submit">提问</button>
+              </div>
+            </form>
+            <div id="knowledge-qa-result" class="knowledge-qa-result" hidden></div>
+          </div>
+        </div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-from-knowledge" type="button">返回问诊</button>
+        </div>
+      </section>
+
       <section id="page-admin" class="page" aria-labelledby="admin-title">
         <div class="page-head">
           <h2 id="admin-title">管理后台</h2>
-          <p>维护康复动作知识库：可筛选、新增、编辑与删除动作；高级配置可打开 API 文档。</p>
+          <p>用户数据统计、处方满意度反馈收集与动作库内容运营管理。</p>
         </div>
         <nav class="admin-quick-nav" id="admin-quick-nav" aria-label="管理快捷入口" hidden>
+          <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-dashboard-section">数据统计</button>
+          <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-users-section">用户管理</button>
+          <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-feedback-section">反馈管理</button>
           <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-test-report-section">测试报告</button>
           <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-create-section">新增动作</button>
           <button class="btn btn-cyan btn-small" type="button" data-admin-target="admin-list-section">管理动作</button>
@@ -573,8 +645,8 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="config.js?v=20260624g"></script>
-    <script src="mock.js?v=20260624g"></script>
-    <script type="module" src="app.js?v=20260624g"></script>
+    <script src="config.js?v=20260625b"></script>
+    <script src="mock.js?v=20260625b"></script>
+    <script type="module" src="app.js?v=20260625b"></script>
   </body>
 </html>

@@ -1,4 +1,18 @@
 import { PoseTracker } from "./pose.js";
+import {
+  escapeHtml,
+  escapeAdminText,
+  formatShortDate,
+  debounce,
+  renderDemoNotice,
+  renderLoadError,
+} from "./shared/ui.js";
+import {
+  ApiError,
+  parseApiError,
+  parseApiErrorDetail,
+} from "./shared/api.js";
+import { createKnowledgePage } from "./pages/knowledge.js";
 
 const state = {
   currentStep: "login",
@@ -32,7 +46,21 @@ const state = {
   adminFilters: { q: "", bodyRegion: "" },
   adminPanelData: null,
   adminScrollFocusTimer: null,
+  knowledgeFilters: { q: "", bodyRegion: "" },
+  knowledgeArticles: [],
+  knowledgeExpandedId: null,
+  knowledgeTab: "articles",
+  knowledgeQaRegions: new Set(),
+  feedbackRating: 0,
+  adminUserFilter: { q: "" },
+  adminFeedbackFilters: { status: "", category: "" },
 };
+
+// Debounced filter reloads (replaces the previous window.*Timer globals).
+// knowledgeFilterDebounced is declared alongside the knowledge page module below.
+const libraryFilterDebounced = debounce(() => renderActionLibraryGrid(), 200);
+const adminFilterDebounced = debounce(() => loadAdminActions({ silent: true }), 300);
+const adminUserFilterDebounced = debounce(() => loadAdminActions({ silent: true }), 300);
 
 const els = {
   stepButtons: () => document.querySelectorAll(".step-item"),
@@ -122,6 +150,13 @@ const els = {
   progressCompletion: document.getElementById("progress-completion"),
   progressReport: document.getElementById("progress-report"),
   progressReportActions: document.getElementById("progress-report-actions"),
+  knowledgeEntryButton: document.getElementById("go-knowledge"),
+  knowledgeArticlesList: document.getElementById("knowledge-articles-list"),
+  knowledgePreventionList: document.getElementById("knowledge-prevention-list"),
+  knowledgeQaResult: document.getElementById("knowledge-qa-result"),
+  knowledgePainRegions: document.getElementById("knowledge-pain-regions"),
+  prescriptionFeedbackCard: document.getElementById("prescription-feedback-card"),
+  prescriptionFeedbackForm: document.getElementById("prescription-feedback-form"),
 };
 
 function readStoredAuth() {
@@ -441,6 +476,9 @@ function goToStep(step) {
   if (step === "admin") {
     loadAdminActions();
   }
+  if (step === "knowledge") {
+    loadKnowledgePage();
+  }
   if (step === "profiles") {
     loadProfilesPage();
   }
@@ -461,6 +499,7 @@ function goToStep(step) {
   }
   if (step === "prescription") {
     updatePrescriptionExportBar();
+    updatePrescriptionFeedbackCard();
   }
 }
 
@@ -510,10 +549,10 @@ function renderPrescriptionRecap(formData) {
   els.prescriptionRecap.hidden = false;
   els.prescriptionRecap.innerHTML = `
     <dl class="recap-grid">
-      <dt>疼痛部位</dt><dd>${regions}</dd>
-      <dt>主诉</dt><dd>${formData.symptoms || "未填写"}</dd>
-      <dt>伤病史</dt><dd>${formData.history || "无"}</dd>
-      <dt>活动度自评</dt><dd><span class="recap-mobility recap-mobility-${mobility.tier}">${formData.mobility_score ?? "—"}/10 · ${mobility.label}</span></dd>
+      <dt>疼痛部位</dt><dd>${escapeHtml(regions)}</dd>
+      <dt>主诉</dt><dd>${escapeHtml(formData.symptoms || "未填写")}</dd>
+      <dt>伤病史</dt><dd>${escapeHtml(formData.history || "无")}</dd>
+      <dt>活动度自评</dt><dd><span class="recap-mobility recap-mobility-${escapeHtml(mobility.tier)}">${escapeHtml(formData.mobility_score ?? "—")}/10 · ${escapeHtml(mobility.label)}</span></dd>
     </dl>
   `;
 }
@@ -526,6 +565,58 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = window.APP_CONFIG
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+// True when the backend API is available (not in Demo mode) and the user is logged in.
+function apiEnabled() {
+  return isSessionReady() && !window.APP_CONFIG.DEMO_MODE;
+}
+
+// True when the backend API is available regardless of login state.
+function apiReady() {
+  return !window.APP_CONFIG.DEMO_MODE;
+}
+
+// Guard for handlers that need both login and a live backend.
+// Shows a toast guiding the user and returns false; callers do `if (!requireApi()) return;`.
+function requireApi() {
+  if (window.APP_CONFIG.DEMO_MODE) {
+    showToast("该功能需要切换到 API 模式并登录后使用");
+    return false;
+  }
+  return requireLogin();
+}
+
+// GET JSON with auth + timeout. Throws on non-2xx.
+async function apiGet(path, { timeoutMs } = {}) {
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}${path}`,
+    { headers: authHeaders() },
+    timeoutMs
+  );
+  if (!response.ok) throw new ApiError(`HTTP ${response.status}`, response);
+  return response.json();
+}
+
+// POST/PUT/DELETE with JSON body + auth + timeout. Returns parsed JSON (or null for empty).
+async function apiSend(method, path, body, { timeoutMs } = {}) {
+  const headers = authHeaders({ "Content-Type": "application/json" });
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}${path}`,
+    {
+      method,
+      headers,
+      body: body == null ? undefined : JSON.stringify(body),
+    },
+    timeoutMs
+  );
+  if (!response.ok) {
+    const detail = await parseApiError(response);
+    throw new ApiError(typeof detail === "string" ? detail : `${method} ${path} 失败`, response);
+  }
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 function readFormData() {
@@ -622,30 +713,6 @@ function focusIntakeField(element) {
         : element.querySelector("textarea, input, select, button");
     focusTarget?.focus({ preventScroll: true });
   });
-}
-
-async function parseApiError(response) {
-  const raw = await response.text();
-  try {
-    const data = JSON.parse(raw);
-    const detail = data.detail;
-    if (typeof detail === "object" && detail !== null) {
-      return detail.message || detail.msg || JSON.stringify(detail);
-    }
-    return detail || raw;
-  } catch {
-    return raw || `HTTP ${response.status}`;
-  }
-}
-
-async function parseApiErrorDetail(response) {
-  const raw = await response.text();
-  try {
-    const data = JSON.parse(raw);
-    return data.detail ?? raw;
-  } catch {
-    return raw;
-  }
 }
 
 function formatSummary(summary) {
@@ -766,6 +833,9 @@ function updateAdminEntry() {
   }
   if (els.goProgressButton) {
     els.goProgressButton.hidden = !loggedIn;
+  }
+  if (els.knowledgeEntryButton) {
+    els.knowledgeEntryButton.hidden = !loggedIn;
   }
   if (els.imagingSectionWrap) {
     els.imagingSectionWrap.hidden = window.APP_CONFIG.DEMO_MODE;
@@ -948,7 +1018,7 @@ function renderProfileCard(profile) {
 
 async function loadProfilesPage() {
   if (!els.profilesList) return;
-  if (!requireLogin() || window.APP_CONFIG.DEMO_MODE) {
+  if (!apiEnabled()) {
     els.profilesList.innerHTML = "<p class=\"hint\">请先登录并切换到 API 模式。</p>";
     return;
   }
@@ -1041,7 +1111,7 @@ function renderImagingReportCard(report) {
 }
 
 async function deleteImagingReport(reportId) {
-  if (!requireLogin() || window.APP_CONFIG.DEMO_MODE) return;
+  if (!requireApi()) return;
   if (!window.confirm("确定删除该影像报告记录？")) return;
   const response = await fetchWithTimeout(
     `${window.APP_CONFIG.API_BASE}/imaging_reports/${reportId}`,
@@ -1093,7 +1163,7 @@ async function loadImagingReports() {
 }
 
 async function uploadImagingReport() {
-  if (!requireLogin() || window.APP_CONFIG.DEMO_MODE) return;
+  if (!requireApi()) return;
   const fileInput = document.getElementById("imaging-file");
   const ocrText = document.getElementById("imaging-ocr-text")?.value.trim();
   const note = document.getElementById("imaging-note")?.value.trim();
@@ -1346,7 +1416,7 @@ async function loadActionLibrary() {
     populateLibraryRegionFilter();
     renderActionLibraryGrid();
   } catch {
-    els.libraryGrid.innerHTML = "<p class=\"hint\">动作库加载失败，请确认后端已启动。</p>";
+    renderLoadError(els.libraryGrid, { message: "动作库加载失败，请确认后端已启动。", onRetry: loadActionLibrary });
   }
 }
 
@@ -1474,7 +1544,13 @@ async function loadFatigueStatus() {
 
 // ── M6: Progress tracking page ──
 async function loadProgressPage() {
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) return;
+  if (!apiEnabled()) {
+    renderDemoNotice(els.progressStatsGrid, { featureName: "康复进度追踪" });
+    if (els.progressVasChart) els.progressVasChart.innerHTML = "";
+    if (els.progressCompletion) els.progressCompletion.innerHTML = "";
+    if (els.progressReport) els.progressReport.innerHTML = "";
+    return;
+  }
   await Promise.all([loadProgressStats(), loadProgressReport()]);
 }
 
@@ -1527,7 +1603,7 @@ async function loadProgressStats() {
       `;
     }
   } catch {
-    grid.innerHTML = '<p class="hint">进度数据加载失败</p>';
+    renderLoadError(grid, { message: "进度数据加载失败，请确认后端已启动后重试。", onRetry: loadProgressStats });
   }
 }
 
@@ -1568,6 +1644,83 @@ async function exportProgressReport() {
     URL.revokeObjectURL(url);
     showToast("周报已导出");
   } catch { showToast("周报导出失败"); }
+}
+
+// ── M7: Knowledge education page ──
+// Page logic lives in pages/knowledge.js as a factory (createKnowledgePage)
+// to keep this file focused on wiring. Dependencies (state, els, api helpers,
+// ui helpers) are injected via the ctx object so the page module has no
+// global coupling. The thin wrappers below keep call sites in goToStep /
+// bindEvents unchanged.
+const knowledgePage = createKnowledgePage({
+  state,
+  els,
+  apiGet,
+  apiSend,
+  escapeHtml,
+  renderLoadError,
+  showToast,
+});
+const loadKnowledgePage = knowledgePage.loadKnowledgePage;
+const switchKnowledgeTab = knowledgePage.switchKnowledgeTab;
+// Debounced reload for the keyword filter input.
+const knowledgeFilterDebounced = debounce(() => loadKnowledgePage(), 300);
+function bindKnowledgePageEvents() {
+  // Delegate to the page module, forwarding the debounced reload so the
+  // filter input uses the same cadence as the rest of the app.
+  knowledgePage.bindKnowledgePageEvents(knowledgeFilterDebounced);
+}
+
+// ── M8: Prescription satisfaction feedback (user side) ──
+// Submitted via POST /feedback with category="prescription"; admins review
+// these in the admin panel's feedback-management section.
+function updatePrescriptionFeedbackCard() {
+  if (!els.prescriptionFeedbackCard) return;
+  // Only show when a real prescription exists and the backend is live
+  // (Demo mode has no persistence target for feedback).
+  const show = Boolean(state.prescription) && !window.APP_CONFIG.DEMO_MODE;
+  els.prescriptionFeedbackCard.hidden = !show;
+}
+
+function updateFeedbackStarRating(rating) {
+  state.feedbackRating = rating;
+  const input = document.getElementById("feedback-rating-value");
+  if (input) input.value = rating ? String(rating) : "";
+  document.querySelectorAll("#feedback-star-rating .star-btn").forEach((btn) => {
+    const value = Number(btn.dataset.rating);
+    btn.classList.toggle("active", value <= rating);
+  });
+}
+
+async function submitPrescriptionFeedback(event) {
+  event.preventDefault();
+  if (!requireLogin()) return;
+  const content = document.getElementById("feedback-content")?.value?.trim();
+  if (!content) {
+    showToast("请填写反馈内容");
+    return;
+  }
+  const rating = state.feedbackRating || null;
+  try {
+    await apiSend("POST", "/feedback", {
+      category: "prescription",
+      rating,
+      content,
+      source: "prescription_page",
+    });
+    showToast("感谢您的反馈！");
+    els.prescriptionFeedbackForm?.reset();
+    updateFeedbackStarRating(0);
+  } catch (error) {
+    showToast(error.message || "反馈提交失败");
+  }
+}
+
+function bindPrescriptionFeedbackEvents() {
+  document.querySelectorAll("#feedback-star-rating .star-btn").forEach((btn) => {
+    btn.addEventListener("click", () => updateFeedbackStarRating(Number(btn.dataset.rating)));
+  });
+  els.prescriptionFeedbackForm?.addEventListener("submit", submitPrescriptionFeedback);
 }
 
 function initProfilePainRegions() {
@@ -1625,7 +1778,7 @@ function todayIsoDate() {
 }
 
 async function loadPatientProfiles() {
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE || !els.patientProfileSelect) return;
+  if (!apiEnabled() || !els.patientProfileSelect) return;
   try {
     const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/patient_profiles`, {
       headers: authHeaders(),
@@ -1651,7 +1804,7 @@ function renderPatientProfileSelect() {
 }
 
 async function createPatientProfileFromIntake(formData) {
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) return null;
+  if (!apiEnabled()) return null;
   const response = await fetchWithTimeout(
     `${window.APP_CONFIG.API_BASE}/patient_profiles`,
     {
@@ -1701,7 +1854,7 @@ async function exportPrescription(format) {
 }
 
 async function submitTrainingCheckin(action, options = {}) {
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) return null;
+  if (!apiEnabled()) return null;
   const payload = {
     prescription_id: state.prescription?.id ?? null,
     patient_profile_id: state.prescription?.patient_profile_id ?? state.selectedPatientProfileId ?? null,
@@ -1732,7 +1885,7 @@ async function submitTrainingCheckin(action, options = {}) {
 
 async function loadTrainingStats() {
   if (!els.trainingStatsPanel) return;
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) {
+  if (!apiEnabled()) {
     els.trainingStatsPanel.hidden = true;
     return;
   }
@@ -1778,14 +1931,6 @@ function getApiDocsUrl() {
     return `${apiBase.slice(0, -4)}/docs`;
   }
   return `${window.location.protocol}//${window.location.hostname}:8000/docs`;
-}
-
-function escapeAdminText(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function parseAdminList(value) {
@@ -1991,7 +2136,138 @@ function renderAdminActionListInner(actions) {
   return `<div class="admin-action-cards">${actions.map((action) => renderAdminActionCard(action)).join("")}</div>`;
 }
 
-function renderAdminPanel({ actions, meta, deploy, testReport }) {
+// ── M8: Admin panel sections (dashboard / users / feedback) ──
+// These render the three new admin blocks backed by /admin/dashboard,
+// /admin/users and /admin/feedback. They are composed into renderAdminPanel.
+function renderAdminDashboardSection(dashboard) {
+  if (!dashboard) {
+    return `<section class="admin-section" id="admin-dashboard-section">
+      <h3>数据统计</h3>
+      <p class="hint">暂无统计数据。</p>
+    </section>`;
+  }
+  const totals = dashboard.totals || {};
+  const recent = dashboard.recent_activity || {};
+  const feedback = dashboard.feedback_summary || {};
+  const risk = dashboard.risk_summary || {};
+  return `<section class="admin-section" id="admin-dashboard-section">
+    <h3>数据统计</h3>
+    <div class="admin-meta-grid">
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.users ?? 0}</span><span class="admin-meta-label">注册用户</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.prescriptions ?? 0}</span><span class="admin-meta-label">处方总数</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.training_checkins ?? 0}</span><span class="admin-meta-label">训练打卡</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.user_feedback ?? 0}</span><span class="admin-meta-label">用户反馈</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.actions ?? 0}</span><span class="admin-meta-label">动作库条目</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${feedback.open_count ?? 0}</span><span class="admin-meta-label">待处理反馈</span></div>
+    </div>
+    <div class="admin-meta-grid">
+      <div class="admin-meta-card admin-meta-wide">
+        <span class="admin-meta-label">近 7 日活跃</span>
+        <span class="hint">新用户 ${recent.new_users_7d ?? 0} · 新处方 ${recent.new_prescriptions_7d ?? 0} · 打卡 ${recent.training_checkins_7d ?? 0} · 反馈 ${recent.feedback_7d ?? 0}</span>
+      </div>
+      <div class="admin-meta-card admin-meta-wide">
+        <span class="admin-meta-label">影像风险预警</span>
+        <span class="hint">中高风险报告 ${risk.red_flag_reports ?? 0} 条</span>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderAdminUsersSection(users) {
+  const rows = (users || [])
+    .map(
+      (user) => `<tr>
+        <td>${escapeAdminText(user.nickname)}<br><span class="hint">${escapeAdminText(user.account)}</span></td>
+        <td>${escapeAdminText(user.role)}</td>
+        <td>${user.prescription_count ?? 0}</td>
+        <td>${user.training_checkin_count ?? 0}</td>
+        <td>${user.feedback_count ?? 0}</td>
+        <td>${formatShortDate(user.created_at)}</td>
+      </tr>`
+    )
+    .join("");
+  return `<section class="admin-section" id="admin-users-section">
+    <div class="admin-section-head">
+      <h3>用户管理</h3>
+      <span class="hint">共 ${(users || []).length} 条</span>
+    </div>
+    <div class="admin-toolbar">
+      <label class="admin-filter">搜索用户
+        <input id="admin-user-filter-q" type="search" placeholder="账号、昵称…" value="${escapeAdminText(state.adminUserFilter.q)}" />
+      </label>
+      <button class="btn btn-secondary btn-small" id="admin-refresh-users" type="button">刷新</button>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>用户</th><th>角色</th><th>处方</th><th>打卡</th><th>反馈</th><th>注册时间</th></tr></thead>
+        <tbody>${rows || "<tr><td colspan=\"6\" class=\"hint\">暂无用户数据</td></tr>"}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderAdminFeedbackCard(item) {
+  const statusOptions = ["open", "processing", "resolved", "closed"]
+    .map(
+      (s) =>
+        `<option value="${s}"${item.status === s ? " selected" : ""}>${s === "open" ? "待处理" : s === "processing" ? "处理中" : s === "resolved" ? "已解决" : "已关闭"}</option>`
+    )
+    .join("");
+  const stars = item.rating ? "★".repeat(item.rating) + "☆".repeat(5 - item.rating) : "未评分";
+  return `<article class="admin-feedback-card" data-feedback-id="${item.id}">
+    <div class="admin-feedback-head">
+      <div>
+        <strong>${escapeAdminText(item.user_nickname || item.user_account || "匿名用户")}</strong>
+        <span class="admin-feedback-meta">${escapeAdminText(item.category)} · ${stars} · ${formatShortDate(item.created_at)}</span>
+      </div>
+      <span class="admin-feedback-status status-${escapeAdminText(item.status)}">${escapeAdminText(item.status)}</span>
+    </div>
+    <p>${escapeAdminText(item.content)}</p>
+    <form class="admin-feedback-update-form" data-feedback-id="${item.id}">
+      <label class="admin-field">处理状态
+        <select name="status">${statusOptions}</select>
+      </label>
+      <label class="admin-field admin-field-wide">管理员备注
+        <input name="admin_note" type="text" value="${escapeAdminText(item.admin_note || "")}" placeholder="可选" />
+      </label>
+      <button class="btn btn-primary btn-small" type="submit">更新</button>
+    </form>
+  </article>`;
+}
+
+function renderAdminFeedbackSection(feedbackItems) {
+  const statusFilter = state.adminFeedbackFilters.status;
+  const categoryFilter = state.adminFeedbackFilters.category;
+  const cards = (feedbackItems || []).map(renderAdminFeedbackCard).join("");
+  return `<section class="admin-section" id="admin-feedback-section">
+    <div class="admin-section-head">
+      <h3>反馈管理</h3>
+      <span class="hint">共 ${(feedbackItems || []).length} 条</span>
+    </div>
+    <div class="admin-toolbar">
+      <label class="admin-filter">状态
+        <select id="admin-feedback-status">
+          <option value="">全部</option>
+          <option value="open"${statusFilter === "open" ? " selected" : ""}>待处理</option>
+          <option value="processing"${statusFilter === "processing" ? " selected" : ""}>处理中</option>
+          <option value="resolved"${statusFilter === "resolved" ? " selected" : ""}>已解决</option>
+          <option value="closed"${statusFilter === "closed" ? " selected" : ""}>已关闭</option>
+        </select>
+      </label>
+      <label class="admin-filter">类别
+        <select id="admin-feedback-category">
+          <option value="">全部</option>
+          <option value="prescription"${categoryFilter === "prescription" ? " selected" : ""}>处方反馈</option>
+          <option value="general"${categoryFilter === "general" ? " selected" : ""}>一般反馈</option>
+        </select>
+      </label>
+      <button class="btn btn-secondary btn-small" id="admin-refresh-feedback" type="button">刷新</button>
+    </div>
+    <div class="admin-feedback-list">${cards || "<p class=\"hint\">暂无反馈记录</p>"}</div>
+  </section>`;
+}
+
+function renderAdminPanel({ actions, meta, deploy, testReport, dashboard, users, feedbackItems }) {
   const regionOptions = (meta?.body_regions || [])
     .map(
       (region) =>
@@ -2000,6 +2276,10 @@ function renderAdminPanel({ actions, meta, deploy, testReport }) {
     .join("");
 
   return `
+    ${renderAdminDashboardSection(dashboard)}
+    ${renderAdminUsersSection(users)}
+    ${renderAdminFeedbackSection(feedbackItems)}
+
     <div class="admin-toolbar">
       <label class="admin-filter">关键词
         <input id="admin-filter-q" type="search" placeholder="名称、ID、说明…" value="${escapeAdminText(state.adminFilters.q)}" />
@@ -2109,6 +2389,35 @@ async function fetchAdminTestReport() {
   }
 }
 
+async function fetchAdminUsers() {
+  const params = new URLSearchParams();
+  if (state.adminUserFilter.q?.trim()) params.set("q", state.adminUserFilter.q.trim());
+  params.set("limit", "50");
+  const query = params.toString();
+  return apiGet(`/admin/users${query ? `?${query}` : ""}`);
+}
+
+async function fetchAdminFeedback() {
+  const params = new URLSearchParams();
+  if (state.adminFeedbackFilters.status) params.set("status", state.adminFeedbackFilters.status);
+  if (state.adminFeedbackFilters.category) params.set("category", state.adminFeedbackFilters.category);
+  params.set("limit", "50");
+  const query = params.toString();
+  return apiGet(`/admin/feedback${query ? `?${query}` : ""}`);
+}
+
+async function fetchAdminDashboard() {
+  return apiGet(`/admin/dashboard`);
+}
+
+async function updateAdminFeedback(feedbackId, payload) {
+  try {
+    return await apiSend("PUT", `/admin/feedback/${feedbackId}`, payload);
+  } catch (error) {
+    throw new Error(error.message || "更新失败");
+  }
+}
+
 async function loadAdminActions(options = {}) {
   if (!els.adminActionsPanel || state.currentUser?.role !== "admin") return;
   const { silent = false } = options;
@@ -2119,22 +2428,28 @@ async function loadAdminActions(options = {}) {
   }
 
   try {
-    const [actionsRes, metaRes, deployRes, testReport] = await Promise.all([
+    const [actionsRes, metaRes, deployRes, testReport, dashboard, users, feedbackItems] = await Promise.all([
       fetchWithTimeout(buildAdminActionsUrl(), { headers: authHeaders() }),
       fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions/meta`, { headers: authHeaders() }),
       fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/deployment/info`),
       fetchAdminTestReport(),
+      fetchAdminDashboard().catch(() => null),
+      fetchAdminUsers().catch(() => []),
+      fetchAdminFeedback().catch(() => []),
     ]);
     if (!actionsRes.ok) throw new Error("admin actions unavailable");
     const actions = await actionsRes.json();
     const meta = metaRes.ok ? await metaRes.json() : null;
     const deploy = deployRes.ok ? await deployRes.json() : null;
-    renderAdminPanelToDom({ actions, meta, deploy, testReport });
+    renderAdminPanelToDom({ actions, meta, deploy, testReport, dashboard, users, feedbackItems });
     if (silent) {
       window.scrollTo(0, scrollY);
     }
   } catch {
-    els.adminActionsPanel.innerHTML = `<p class="hint">管理员面板加载失败，请确认账号具备 admin 权限且后端已启动。</p>`;
+    renderLoadError(els.adminActionsPanel, {
+      message: "管理员面板加载失败，请确认账号具备 admin 权限且后端已启动。",
+      onRetry: () => loadAdminActions(),
+    });
     state.adminPanelData = null;
   }
 }
@@ -2216,6 +2531,20 @@ function bindAdminPanelEvents() {
       return;
     }
 
+    const refreshUsersButton = event.target.closest("#admin-refresh-users");
+    if (refreshUsersButton) {
+      await loadAdminActions({ silent: true });
+      showToast("用户列表已刷新");
+      return;
+    }
+
+    const refreshFeedbackButton = event.target.closest("#admin-refresh-feedback");
+    if (refreshFeedbackButton) {
+      await loadAdminActions({ silent: true });
+      showToast("反馈列表已刷新");
+      return;
+    }
+
     const editButton = event.target.closest(".admin-edit-action");
     if (editButton) {
       toggleAdminActionEdit(editButton.dataset.actionId);
@@ -2246,16 +2575,26 @@ function bindAdminPanelEvents() {
       state.adminFilters.bodyRegion = event.target.value;
       await loadAdminActions({ silent: true });
     }
+    if (event.target.id === "admin-feedback-status") {
+      state.adminFeedbackFilters.status = event.target.value;
+      await loadAdminActions({ silent: true });
+    }
+    if (event.target.id === "admin-feedback-category") {
+      state.adminFeedbackFilters.category = event.target.value;
+      await loadAdminActions({ silent: true });
+    }
   });
 
   els.adminActionsPanel.addEventListener("input", (event) => {
     if (state.currentUser?.role !== "admin") return;
+    if (event.target.id === "admin-user-filter-q") {
+      state.adminUserFilter.q = event.target.value;
+      adminUserFilterDebounced();
+      return;
+    }
     if (event.target.id !== "admin-filter-q") return;
     state.adminFilters.q = event.target.value;
-    clearTimeout(window.adminFilterTimer);
-    window.adminFilterTimer = window.setTimeout(() => {
-      loadAdminActions({ silent: true });
-    }, 300);
+    adminFilterDebounced();
   });
 
   els.adminActionsPanel.addEventListener("submit", async (event) => {
@@ -2278,6 +2617,24 @@ function bindAdminPanelEvents() {
         await submitAdminEdit(editForm.dataset.actionId, editForm);
       } catch (error) {
         showToast(error.message || "保存失败");
+      }
+      return;
+    }
+
+    const feedbackForm = event.target.closest(".admin-feedback-update-form");
+    if (feedbackForm) {
+      event.preventDefault();
+      const formData = new FormData(feedbackForm);
+      const payload = {
+        status: formData.get("status")?.toString() || undefined,
+        admin_note: formData.get("admin_note")?.toString().trim() || undefined,
+      };
+      try {
+        await updateAdminFeedback(Number(feedbackForm.dataset.feedbackId), payload);
+        showToast("反馈已更新");
+        await loadAdminActions({ silent: true });
+      } catch (error) {
+        showToast(error.message || "更新失败");
       }
     }
   });
@@ -2310,23 +2667,23 @@ function updateUserIdentity() {
 
 function renderHistoryCard(prescription) {
   const header = [
-    prescription.patient_name ? `患者：${prescription.patient_name}` : "",
-    prescription.patient_age ? `年龄：${prescription.patient_age}` : "",
+    prescription.patient_name ? `患者：${escapeHtml(prescription.patient_name)}` : "",
+    prescription.patient_age ? `年龄：${escapeHtml(prescription.patient_age)}` : "",
   ]
     .filter(Boolean)
     .join(" | ");
 
   return `
     <article class="history-card">
-      <h4>处方 #${prescription.id || "N/A"}</h4>
+      <h4>处方 #${escapeHtml(prescription.id || "N/A")}</h4>
       ${header ? `<div class="meta">${header}</div>` : ""}
       <div class="summary-block">${formatSummary(prescription.summary)}</div>
       <ul>
         ${prescription.actions
           .map(
             (action) =>
-              `<li><strong>${action.name}</strong>：${action.sets}组 × ${action.reps}次${
-                action.note ? `（${action.note}）` : ""
+              `<li><strong>${escapeHtml(action.name)}</strong>：${escapeHtml(action.sets)}组 × ${escapeHtml(action.reps)}次${
+                action.note ? `（${escapeHtml(action.note)}）` : ""
               }</li>`
           )
           .join("")}
@@ -2334,8 +2691,8 @@ function renderHistoryCard(prescription) {
       ${
         prescription.id && !window.APP_CONFIG.DEMO_MODE
           ? `<div class="history-card-actions">
-              <button class="btn btn-secondary btn-small history-export-md" type="button" data-id="${prescription.id}">导出 MD</button>
-              <button class="btn btn-secondary btn-small history-export-json" type="button" data-id="${prescription.id}">导出 JSON</button>
+              <button class="btn btn-secondary btn-small history-export-md" type="button" data-id="${escapeHtml(prescription.id)}">导出 MD</button>
+              <button class="btn btn-secondary btn-small history-export-json" type="button" data-id="${escapeHtml(prescription.id)}">导出 JSON</button>
             </div>`
           : ""
       }
@@ -2393,7 +2750,7 @@ async function loadPrescriptionHistory() {
       error?.name === "AbortError"
         ? "历史处方请求超时，请确认后端已启动。"
         : "加载失败，请确认后端已启动且已登录。";
-    els.prescriptionHistory.textContent = hint;
+    renderLoadError(els.prescriptionHistory, { message: hint, onRetry: loadPrescriptionHistory });
   }
 }
 
@@ -2493,55 +2850,56 @@ function renderPrescription(prescription) {
       <div class="action-image-wrap">
         <img
           src="${window.APP_CONFIG.assetUrl(action.image)}"
-          alt="${action.name}示意图"
+          alt="${escapeHtml(action.name)}示意图"
           loading="lazy"
           onerror="handleActionImageError(this)"
         />
         <span class="action-image-placeholder">示意图待上传</span>
       </div>
       <div class="action-card-body">
-        <h3>${action.name}</h3>
+        <h3>${escapeHtml(action.name)}</h3>
         <div class="action-meta">
-          <span class="tag">${action.sets} 组</span>
-          <span class="tag">${action.reps} 次/组</span>
-          ${action.frequency ? `<span class="tag tag-frequency">${action.frequency}</span>` : ""}
-          ${action.difficulty_level ? `<span class="tag tag-difficulty${action.difficulty_level === "中级" ? " mid" : action.difficulty_level === "高级" ? " advanced" : ""}">${escapeAdminText(action.difficulty_level)}</span>` : ""}
+          <span class="tag">${escapeHtml(action.sets)} 组</span>
+          <span class="tag">${escapeHtml(action.reps)} 次/组</span>
+          ${action.frequency ? `<span class="tag tag-frequency">${escapeHtml(action.frequency)}</span>` : ""}
+          ${action.difficulty_level ? `<span class="tag tag-difficulty${action.difficulty_level === "中级" ? " mid" : action.difficulty_level === "高级" ? " advanced" : ""}">${escapeHtml(action.difficulty_level)}</span>` : ""}
           <span class="tag ${poseSupported ? "tag-supported" : "tag-pending"}">
             ${poseSupported ? "支持实时纠正" : "暂不支持实时纠正"}
           </span>
         </div>
-        <p>${action.description || "按医嘱缓慢完成动作，注意呼吸节奏。"}</p>
+        <p>${escapeHtml(action.description || "按医嘱缓慢完成动作，注意呼吸节奏。")}</p>
         ${renderActionVideoMarkup(action)}
         ${
           action.note
-            ? `<p><strong>注意：</strong>${action.note}</p>`
+            ? `<p><strong>注意：</strong>${escapeHtml(action.note)}</p>`
             : ""
         }
         ${
           action.contraindications
-            ? `<p class="hint"><strong>禁忌：</strong>${action.contraindications}</p>`
+            ? `<p class="hint"><strong>禁忌：</strong>${escapeHtml(action.contraindications)}</p>`
             : ""
         }
         ${
           action.progression
-            ? `<p class="hint"><strong>进阶：</strong>${action.progression}</p>`
+            ? `<p class="hint"><strong>进阶：</strong>${escapeHtml(action.progression)}</p>`
             : ""
         }
         ${
           action.regression
-            ? `<p class="hint"><strong>降阶：</strong>${action.regression}</p>`
+            ? `<p class="hint"><strong>降阶：</strong>${escapeHtml(action.regression)}</p>`
             : ""
         }
-        <button class="btn btn-primary view-demo" type="button" data-action-id="${action.id || ""}">
+        <button class="btn btn-primary view-demo" type="button" data-action-id="${escapeHtml(action.id || "")}">
           查看演示${poseSupported ? " / 跟练" : ""}
         </button>
-        ${poseSupported ? "" : `<p class="hint support-hint">${window.APP_CONFIG.getUnsupportedPoseHint()}</p>`}
+        ${poseSupported ? "" : `<p class="hint support-hint">${escapeHtml(window.APP_CONFIG.getUnsupportedPoseHint())}</p>`}
       </div>
     `;
     els.actionList.appendChild(card);
   });
 
   updatePrescriptionExportBar();
+  updatePrescriptionFeedbackCard();
 
   els.actionList.querySelectorAll(".view-demo").forEach((button) => {
     button.addEventListener("click", () => {
@@ -3110,6 +3468,8 @@ function bindEvents() {
   });
 
   els.goProgressButton?.addEventListener("click", () => goToStep("progress"));
+  els.knowledgeEntryButton?.addEventListener("click", () => goToStep("knowledge"));
+  document.getElementById("back-from-knowledge")?.addEventListener("click", () => goToStep("intake"));
   document.getElementById("back-from-progress")?.addEventListener("click", () => goToStep("history"));
   document.getElementById("export-report-md")?.addEventListener("click", exportProgressReport);
   document.getElementById("toggle-voice")?.addEventListener("click", toggleVoice);
@@ -3140,8 +3500,7 @@ function bindEvents() {
   document.getElementById("refresh-library")?.addEventListener("click", loadActionLibrary);
   document.getElementById("library-filter-q")?.addEventListener("input", (event) => {
     state.libraryFilters.q = event.target.value;
-    clearTimeout(window.libraryFilterTimer);
-    window.libraryFilterTimer = window.setTimeout(renderActionLibraryGrid, 200);
+    libraryFilterDebounced();
   });
   document.getElementById("library-filter-region")?.addEventListener("change", (event) => {
     state.libraryFilters.bodyRegion = event.target.value;
@@ -3155,6 +3514,8 @@ function bindEvents() {
   bindImagingReportEvents();
   bindAdminPanelEvents();
   bindAdminQuickNavEvents();
+  bindKnowledgePageEvents();
+  bindPrescriptionFeedbackEvents();
   document.getElementById("back-from-admin")?.addEventListener("click", () => goToStep("intake"));
 
   document.getElementById("demo-start-training")?.addEventListener("click", () => {
@@ -3230,6 +3591,7 @@ function restoreSessionState() {
     renderPrescription(savedPrescription);
     renderPrescriptionRecap(savedFormData);
     updatePrescriptionExportBar();
+    updatePrescriptionFeedbackCard();
 
     const validSteps = ["prescription", "history", "intake"];
     const targetStep = validSteps.includes(savedStep) ? savedStep : "prescription";
