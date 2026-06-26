@@ -65,7 +65,7 @@ class BackendSmokeSuite:
             self.record("实时动作纠正接口", self.pose_correction_flow)
             self.record("RTMPose流式推理接口", self.pose_streaming_flow)
             self.record("3D骨骼与AR叠加服务", self.visual_overlay_flow)
-            self.record("语音纠错与疲劳监测", self.voice_and_fatigue_flow)
+            self.record("语音纠错提示", self.voice_cue_flow)
             self.record("医生协同与处方动态调整闭环", self.doctor_collaboration_flow)
             self.record("康复进度报告", self.progress_report_flow)
             self.record("知识科普与问答", self.knowledge_education_flow)
@@ -411,7 +411,7 @@ class BackendSmokeSuite:
         assert overlay["viewport"]["mirror"] is True
         assert overlay["items"]
 
-    def voice_and_fatigue_flow(self):
+    def voice_cue_flow(self):
         response = self.client.post("/api/voice/cue", headers=self.user_headers, json={
             "feedback": ["动作幅度还不够，请缓慢抬高一点。"],
             "status": "warning",
@@ -423,34 +423,6 @@ class BackendSmokeSuite:
         assert data["text"]
         assert data["ssml"]
         assert data["priority"] == "medium"
-
-        response = self.client.post("/api/wearables/metrics", headers=self.user_headers, json={
-            "patient_profile_id": self.created_profile_id,
-            "training_checkin_id": self.created_checkin_id,
-            "device_type": "test_band",
-            "heart_rate": 156,
-            "resting_heart_rate": 72,
-            "hrv_ms": 22,
-            "spo2": 96,
-            "perceived_exertion": 8,
-            "duration_minutes": 45,
-        })
-        assert response.status_code == 201, response.text
-        metric = response.json()
-        assert metric["fatigue_score"] >= 45
-        assert metric["risk_level"] in ("medium", "high")
-        assert metric["recommendation"]
-
-        response = self.client.get("/api/wearables/fatigue/status", headers=self.user_headers)
-        assert response.status_code == 200, response.text
-        status = response.json()
-        assert status["sample_count"] >= 1
-        assert status["fatigue_score"] >= 0
-        assert status["recommendation"]
-
-        response = self.client.get("/api/wearables/metrics", headers=self.user_headers)
-        assert response.status_code == 200, response.text
-        assert any(item["id"] == metric["id"] for item in response.json())
 
     def doctor_collaboration_flow(self):
         response = self.client.post("/api/doctor_links", headers=self.user_headers, json={

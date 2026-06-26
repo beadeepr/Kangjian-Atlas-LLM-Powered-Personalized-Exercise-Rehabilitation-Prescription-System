@@ -24,9 +24,21 @@ function enrichAction(action) {
     contraindications: action.contraindications ?? catalog?.contraindications ?? "",
     progression: action.progression ?? catalog?.progression ?? "",
     regression: action.regression ?? catalog?.regression ?? "",
-    image: catalog?.image ?? (rawId ? window.APP_CONFIG.actionImage(rawId) : ""),
-    videoUrl: catalog?.videoUrl || "",
-    videoHint: catalog?.videoHint || "",
+    category: action.category ?? "",
+    difficulty_level: action.difficulty_level ?? "初级",
+    stage: action.stage ?? "",
+    target_muscles: action.target_muscles ?? [],
+    equipment: action.equipment ?? [],
+    body_regions: action.body_regions ?? catalog?.target_regions ?? [],
+    steps: action.steps ?? [],
+    common_mistakes: action.common_mistakes ?? [],
+    correct_cues: action.correct_cues ?? [],
+    error_comparisons: action.error_comparisons ?? [],
+    difficulty_profiles: action.difficulty_profiles ?? [],
+    risk_level: action.risk_level ?? "",
+    image: action.image || catalog?.image || (rawId ? window.APP_CONFIG.actionImage(rawId) : ""),
+    videoUrl: action.video_url || action.videoUrl || catalog?.videoUrl || "",
+    videoHint: action.video_hint || action.videoHint || catalog?.videoHint || "",
   };
 }
 
@@ -171,6 +183,35 @@ function mockCorrectPose(payload) {
   }
 
   const catalogId = window.APP_CONFIG.normalizeCatalogActionId(action_id);
+
+  const required = window.APP_CONFIG.POSE_REQUIRED_KEYPOINTS?.[catalogId] || [];
+  const missing = required
+    .filter((index) => (visibility?.[index] ?? 0) < window.APP_CONFIG.POSE_VISIBILITY_MIN)
+    .map((index) => window.APP_CONFIG.POSE_KEYPOINT_NAMES[index] || `关键点${index}`);
+  if (missing.length) {
+    if (missing.length === required.length) {
+      return {
+        feedback: [
+          "未识别到该动作的关键关节，请确保目标部位完整入镜并重新采集姿态。",
+        ],
+        score: 0,
+        status: "error",
+      };
+    }
+
+    const names =
+      missing.length === 1
+        ? missing[0]
+        : `${missing.slice(0, -1).join("、")}和${missing[missing.length - 1]}`;
+    return {
+      feedback: [
+        `未识别到${names}，请调整摄像头角度或使这些部位更清晰可见。`,
+      ],
+      score: 35,
+      status: "warning",
+    };
+  }
+
   if (!window.APP_CONFIG.isPoseSupported(catalogId)) {
     return {
       feedback: ["暂不支持该动作"],
@@ -235,6 +276,70 @@ function mockCorrectPose(payload) {
   };
 }
 
+function buildMockKnowledgeArticles(q, bodyRegion, limit = 10) {
+  const regions = bodyRegion ? [bodyRegion] : window.PAIN_REGIONS;
+  const preventionTips = {
+    颈部: ["减少长时间低头，每 30-45 分钟进行一次颈肩放松。", "屏幕高度尽量与视线平齐。", "睡眠枕头以支撑颈椎自然曲度为宜。"],
+    肩部: ["避免突然大幅度抬举重物。", "久坐办公时保持肩部放松。", "肩痛明显时优先做小幅度活动度练习。"],
+    腰部: ["久坐时每 30-45 分钟起身活动。", "搬物时靠近身体并屈髋屈膝。", "核心训练应从低负荷开始。"],
+    膝关节: ["上下楼时保持膝盖朝向脚尖。", "疼痛期减少跑跳和深蹲。", "训练后若肿胀增加应降低强度。"],
+    踝关节: ["急性扭伤早期避免强行拉伸。", "恢复期逐步加入踝泵和平衡训练。", "运动前做好踝关节热身。"],
+  };
+  const summaries = {
+    颈部: "颈部康复重点是减少头前伸负荷、恢复深层颈屈肌控制。",
+    肩部: "肩部康复重点是恢复肩胛稳定与肩关节活动度。",
+    腰部: "腰部康复重点是控制疼痛诱因、恢复核心稳定。",
+    膝关节: "膝关节康复重点是改善疼痛、恢复股四头肌力量。",
+    踝关节: "踝关节康复重点是恢复活动度并逐步恢复负重能力。",
+  };
+  let articles = regions.map((region) => {
+    const related = Object.values(window.ACTION_CATALOG)
+      .filter((a) => (a.target_regions || []).includes(region))
+      .slice(0, 4)
+      .map((a) => ({ id: a.id, name: a.name, sets: a.sets, reps: a.reps }));
+    return {
+      id: `region_${region}`,
+      title: `${region}康复与预防建议`,
+      category: "康复百科",
+      body_regions: [region],
+      summary: summaries[region] || `${region}康复应遵循循序渐进原则。`,
+      content: `${summaries[region] || ""} 可结合相关低风险训练建立基础能力。`,
+      related_actions: related,
+      prevention_tips: preventionTips[region] || ["保持规律活动，避免突然增加训练量。"],
+    };
+  });
+  if (q) {
+    articles = articles.filter(
+      (a) =>
+        a.title.includes(q) ||
+        a.summary.includes(q) ||
+        a.body_regions.some((r) => r.includes(q))
+    );
+  }
+  return articles.slice(0, limit);
+}
+
+function answerMockKnowledgeQuestion(question, painRegions, limit = 4) {
+  const regions = painRegions?.length ? painRegions : ["相关部位"];
+  const regionText = regions.join("、");
+  const articles = buildMockKnowledgeArticles(question, regions[0], limit);
+  const suggested = selectActionsForPrescription({
+    symptoms: question,
+    pain_regions: regions.filter((r) => window.PAIN_REGIONS.includes(r)),
+    mobility_score: 5,
+  });
+  return {
+    answer: `根据本地康复知识库，你的问题主要关联 ${regionText}。${articles[0]?.summary || ""} 可优先参考 ${suggested.map((a) => a.name).join("、") || "基础活动度训练"}，从低强度开始，训练前后记录 VAS 疼痛评分。`,
+    references: articles,
+    suggested_actions: suggested,
+    safety_notes: [
+      "若出现剧烈疼痛、麻木无力、大小便异常，请停止训练并及时就医。",
+      "科普问答不能替代医生诊断，具体训练强度需结合个人病情调整。",
+    ],
+    rag_contexts: [],
+  };
+}
+
 function generateDemoKeypoints(actionId) {
   const points = Array.from({ length: 33 }, () => [0.5, 0.5, 0]);
   const visibility = Array.from({ length: 33 }, () => 0.95);
@@ -264,4 +369,6 @@ window.MockService = {
   mockCorrectPose,
   generateDemoKeypoints,
   selectActionsForPrescription,
+  buildMockKnowledgeArticles,
+  answerMockKnowledgeQuestion,
 };

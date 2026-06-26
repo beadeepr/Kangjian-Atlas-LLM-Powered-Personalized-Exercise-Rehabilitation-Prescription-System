@@ -59,7 +59,28 @@ def _score_response(feedback: list[str], score: int) -> dict[str, Any]:
     return {"feedback": feedback, "score": score, "status": status}
 
 
-def _visibility_guard(action_id: str, visibility: list[float]) -> dict[str, Any] | None:
+KEYPOINT_NAMES = {
+    0: "鼻子",
+    1: "左眼",
+    2: "右眼",
+    3: "左耳",
+    4: "右耳",
+    5: "左肩",
+    6: "右肩",
+    7: "左肘",
+    8: "右肘",
+    9: "左腕",
+    10: "右腕",
+    11: "左髋",
+    12: "右髋",
+    13: "左膝",
+    14: "右膝",
+    15: "左踝",
+    16: "右踝",
+}
+
+
+def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: list[float]) -> dict[str, Any] | None:
     required_map = {
         "neck_chin_tuck": [COCO_KEYPOINTS["nose"], COCO_KEYPOINTS["left_ear"], COCO_KEYPOINTS["right_ear"], COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"]],
         "chin_tuck": [COCO_KEYPOINTS["nose"], COCO_KEYPOINTS["left_ear"], COCO_KEYPOINTS["right_ear"], COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"]],
@@ -82,19 +103,38 @@ def _visibility_guard(action_id: str, visibility: list[float]) -> dict[str, Any]
     if not visibility:
         return None
     required = required_map.get(action_id, list(range(min(17, len(visibility)))))
-    visible_count = sum(1 for index in required if index < len(visibility) and visibility[index] >= 0.5)
-    if visible_count < max(2, int(len(required) * 0.65)):
+    missing = []
+    for index in required:
+        if index >= len(visibility) or visibility[index] < 0.5:
+            missing.append(KEYPOINT_NAMES.get(index, f"关键点{index}"))
+    if not missing:
+        return None
+
+    if len(missing) == len(required):
         return {
-            "feedback": ["关键关节识别不完整，请后退一点并确保目标部位完整入镜。"],
-            "score": 35,
-            "status": "warning",
+            "feedback": [
+                "未识别到该动作的关键关节，请确保目标部位完整入镜并重新采集姿态。",
+            ],
+            "score": 0,
+            "status": "error",
         }
-    return None
+
+    if len(missing) == 1:
+        message = f"未识别到{missing[0]}，请调整摄像头角度或使该部位更清晰可见。"
+    else:
+        message = f"未识别到{'、'.join(missing[:-1])}和{missing[-1]}，请调整摄像头角度或使这些部位更清晰可见。"
+
+    return {
+        "feedback": [message],
+        "score": 35,
+        "status": "warning",
+    }
 
 
 def analyze_pose(action_id: str, keypoints: list[list[float]], visibility: list[float]) -> dict[str, Any]:
     action_id = "neck_chin_tuck" if action_id == "chin_tuck" else action_id
-    # 不再进行可见度门控，以避免“请后退一点并确保目标部位完整入镜”的提示
+    if result := _visibility_guard(action_id, keypoints, visibility):
+        return result
 
     checkers = {
         "neck_chin_tuck": _check_neck_chin_tuck,

@@ -31,6 +31,44 @@ window.APP_CONFIG = {
   POSE_SEND_INTERVAL_MS: 50,
   POSE_USE_BACKEND: true,
   POSE_VISIBILITY_MIN: 0.5,
+  POSE_KEYPOINT_NAMES: {
+    0: "鼻子",
+    1: "左眼",
+    2: "右眼",
+    3: "左耳",
+    4: "右耳",
+    5: "左肩",
+    6: "右肩",
+    7: "左肘",
+    8: "右肘",
+    9: "左腕",
+    10: "右腕",
+    11: "左髋",
+    12: "右髋",
+    13: "左膝",
+    14: "右膝",
+    15: "左踝",
+    16: "右踝",
+  },
+  POSE_REQUIRED_KEYPOINTS: {
+    neck_chin_tuck: [0, 3, 4, 5, 6],
+    chin_tuck: [0, 3, 4, 5, 6],
+    neck_side_bend: [0, 3, 4, 5, 6],
+    scapular_retraction: [3, 4, 5, 6],
+    thoracic_extension: [5, 6, 11, 12],
+    mckenzie_press_up: [5, 6, 7, 8, 9, 10, 11, 12],
+    pelvic_tilt: [5, 6, 11, 12],
+    bird_dog: [5, 6, 11, 12, 7, 8, 13, 14],
+    dead_bug: [5, 6, 11, 12, 9, 10],
+    glute_bridge: [5, 6, 11, 12, 13, 14],
+    wall_squat: [11, 12, 13, 14, 15, 16],
+    straight_leg_raise: [11, 12, 13, 14, 15, 16],
+    quad_set: [11, 12, 13, 14],
+    calf_stretch: [13, 14, 15, 16],
+    ankle_pump: [13, 14, 15, 16],
+    shoulder_pendulum: [5, 6, 7, 8, 9, 10],
+    shoulder_external_rotation: [5, 6, 7, 8, 11, 12],
+  },
   SUPPORTED_POSE_ACTION_IDS: [
     "neck_side_bend",
     "neck_chin_tuck",
@@ -87,6 +125,38 @@ window.APP_CONFIG = {
   },
   getUnsupportedPoseHint() {
     return "该动作暂不支持实时纠正，可先按处方说明与示范视频完成训练。";
+  },
+  MOBILITY_GUIDES: {
+    颈部: {
+      icon: "🔄",
+      title: "颈部旋转测试",
+      instruction: "坐姿缓慢左右转头，观察是否出现疼痛、麻木或明显受限。",
+    },
+    肩部: {
+      icon: "🙆",
+      title: "扶墙滑臂测试",
+      instruction: "面对墙面，示指沿墙向上滑动，比较两侧抬臂高度与是否诱发肩痛。",
+    },
+    腰部: {
+      icon: "🧍",
+      title: "前屈触趾测试",
+      instruction: "站立缓慢前屈，评估腰部是否僵硬、疼痛或无法继续弯曲。",
+    },
+    膝关节: {
+      icon: "🦵",
+      title: "半蹲测试",
+      instruction: "扶椅背缓慢半蹲，观察膝部是否疼痛、弹响或无法完成。",
+    },
+    踝关节: {
+      icon: "👣",
+      title: "勾脚背屈测试",
+      instruction: "坐位勾脚背，比较两侧背屈幅度与跟腱/小腿是否牵拉痛。",
+    },
+  },
+  DEFAULT_MOBILITY_GUIDE: {
+    icon: "📋",
+    title: "日常活动自评",
+    instruction: "回忆近期弯腰、下蹲、转身、抬手等动作是否因疼痛明显受限。",
   },
 };
 

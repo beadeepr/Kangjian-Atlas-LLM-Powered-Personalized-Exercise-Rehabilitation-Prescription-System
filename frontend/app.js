@@ -1,4 +1,18 @@
 import { PoseTracker } from "./pose.js";
+import {
+  escapeHtml,
+  escapeAdminText,
+  formatShortDate,
+  debounce,
+  renderDemoNotice,
+  renderLoadError,
+} from "./shared/ui.js";
+import {
+  ApiError,
+  parseApiError,
+  parseApiErrorDetail,
+} from "./shared/api.js";
+import { createKnowledgePage } from "./pages/knowledge.js";
 
 const state = {
   currentStep: "login",
@@ -16,12 +30,37 @@ const state = {
   authTab: "login",
   selectedPatientProfileId: null,
   patientProfiles: [],
+  profileFormRegions: new Set(),
+  profileReturnStep: "intake",
+  actionLibrary: [],
+  libraryFilters: { q: "", bodyRegion: "", difficulty: "" },
+  imagingReports: [],
+  voiceEnabled: false,
+  trainingStartTime: null,
+  trainingTimer: null,
+  trainingRepCount: 0,
+  trainingSetCount: 0,
+  lastRepStatus: null,
   trainingLastScore: null,
   adminEditingId: null,
   adminFilters: { q: "", bodyRegion: "" },
   adminPanelData: null,
   adminScrollFocusTimer: null,
+  knowledgeFilters: { q: "", bodyRegion: "" },
+  knowledgeArticles: [],
+  knowledgeExpandedId: null,
+  knowledgeTab: "articles",
+  knowledgeQaRegions: new Set(),
+  feedbackRating: 0,
+  adminUserFilter: { q: "" },
+  adminFeedbackFilters: { status: "", category: "" },
 };
+
+// Debounced filter reloads (replaces the previous window.*Timer globals).
+// knowledgeFilterDebounced is declared alongside the knowledge page module below.
+const libraryFilterDebounced = debounce(() => renderActionLibraryGrid(), 200);
+const adminFilterDebounced = debounce(() => loadAdminActions({ silent: true }), 300);
+const adminUserFilterDebounced = debounce(() => loadAdminActions({ silent: true }), 300);
 
 const els = {
   stepButtons: () => document.querySelectorAll(".step-item"),
@@ -69,6 +108,8 @@ const els = {
   feedbackList: document.getElementById("feedback-list"),
   modeBadge: document.getElementById("mode-badge"),
   toast: document.getElementById("toast"),
+  toastMessage: document.getElementById("toast-message"),
+  toastClose: document.getElementById("toast-close"),
   authAccount: document.getElementById("auth-account"),
   authPassword: document.getElementById("auth-password"),
   authRegisterAccount: document.getElementById("auth-register-account"),
@@ -87,25 +128,78 @@ const els = {
   checkinPainAfter: document.getElementById("checkin-pain-after"),
   checkinNote: document.getElementById("checkin-note"),
   adminEntryButton: document.getElementById("go-admin"),
+  profilesEntryButton: document.getElementById("go-profiles"),
+  libraryEntryButton: document.getElementById("go-library"),
   adminActionsPanel: document.getElementById("admin-actions-panel"),
   adminQuickNav: document.getElementById("admin-quick-nav"),
+  mobilityTier: document.getElementById("mobility-tier"),
+  mobilityGuideCards: document.getElementById("mobility-guide-cards"),
+  redFlagOverlay: document.getElementById("red-flag-overlay"),
+  redFlagMessage: document.getElementById("red-flag-message"),
+  redFlagList: document.getElementById("red-flag-list"),
+  mobilitySummary: document.getElementById("mobility-summary"),
+  imagingSectionWrap: document.getElementById("imaging-section-wrap"),
+  imagingSection: document.getElementById("imaging-section"),
+  imagingReportsList: document.getElementById("imaging-reports-list"),
+  profilesList: document.getElementById("profiles-list"),
+  profileFormCard: document.getElementById("profile-form-card"),
+  profileForm: document.getElementById("profile-form"),
+  profilePainRegions: document.getElementById("profile-pain-regions"),
+  libraryGrid: document.getElementById("library-grid"),
+  goProgressButton: document.getElementById("go-progress"),
+  progressStatsGrid: document.getElementById("progress-stats-grid"),
+  progressVasChart: document.getElementById("progress-vas-chart"),
+  progressCompletion: document.getElementById("progress-completion"),
+  progressReport: document.getElementById("progress-report"),
+  progressReportActions: document.getElementById("progress-report-actions"),
+  knowledgeEntryButton: document.getElementById("go-knowledge"),
+  knowledgeArticlesList: document.getElementById("knowledge-articles-list"),
+  knowledgePreventionList: document.getElementById("knowledge-prevention-list"),
+  knowledgeQaResult: document.getElementById("knowledge-qa-result"),
+  knowledgePainRegions: document.getElementById("knowledge-pain-regions"),
+  prescriptionFeedbackCard: document.getElementById("prescription-feedback-card"),
+  prescriptionFeedbackForm: document.getElementById("prescription-feedback-form"),
 };
+
+const AUTH_TOKEN_KEY = "kj_auth_token";
+const AUTH_USER_KEY = "kj_auth_user";
+const LEGACY_AUTH_KEY = "kj_auth";
 
 function readStoredAuth() {
   try {
-    return JSON.parse(localStorage.getItem("kj_auth") || "null");
+    const token = sessionStorage.getItem(AUTH_TOKEN_KEY);
+    const userRaw = localStorage.getItem(AUTH_USER_KEY);
+    if (token && userRaw) {
+      return { token, user: JSON.parse(userRaw) };
+    }
+    const legacyRaw = localStorage.getItem(LEGACY_AUTH_KEY);
+    if (legacyRaw) {
+      const legacy = JSON.parse(legacyRaw);
+      if (legacy?.token) {
+        saveAuth(legacy);
+        return legacy;
+      }
+    }
+    return null;
   } catch (error) {
     return null;
   }
 }
 
 function saveAuth(auth) {
-  state.auth = auth;
-  if (auth) {
-    localStorage.setItem("kj_auth", JSON.stringify(auth));
+  if (auth?.token) {
+    state.auth = auth;
+    sessionStorage.setItem(AUTH_TOKEN_KEY, auth.token);
+    if (auth.user) {
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(auth.user));
+    }
+    localStorage.removeItem(LEGACY_AUTH_KEY);
     syncCurrentUserFromAuth();
   } else {
-    localStorage.removeItem("kj_auth");
+    state.auth = null;
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem(LEGACY_AUTH_KEY);
   }
   updateAuthStatus();
 }
@@ -138,7 +232,7 @@ function requireLogin() {
   if (isSessionReady()) {
     return true;
   }
-  showToast("请先登录或注册后再继续");
+  showWarnToast("请先登录或注册后再继续");
   goToStep("login");
   return false;
 }
@@ -243,7 +337,7 @@ async function submitAuth(mode) {
 
     if (!response.ok) {
       const detail = await parseApiError(response);
-      showToast(typeof detail === "string" ? detail : "账号或密码错误");
+      showErrorToast(typeof detail === "string" ? detail : "账号或密码错误");
       return;
     }
 
@@ -284,7 +378,7 @@ async function submitAuth(mode) {
     goToStep("intake");
   } catch (error) {
     const isNetworkError = error instanceof TypeError;
-    showToast(
+    showErrorToast(
       error?.name === "AbortError"
         ? "登录请求超时，请确认后端已启动"
         : isNetworkError
@@ -311,13 +405,35 @@ function logoutSession() {
   showToast("已退出登录");
 }
 
-function showToast(message) {
-  els.toast.textContent = message;
-  els.toast.classList.add("show");
+function hideToast() {
+  if (!els.toast) return;
   window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    els.toast.classList.remove("show");
-  }, 3200);
+  els.toast.classList.remove("show", "toast-error", "toast-warn");
+}
+
+function showToast(message, options = {}) {
+  if (!els.toast || !els.toastMessage) return;
+  const type = options.type || "info";
+  const duration =
+    options.duration ??
+    (type === "error" ? 5600 : type === "warn" ? 4800 : 3200);
+
+  els.toastMessage.textContent = message;
+  els.toast.classList.remove("toast-error", "toast-warn");
+  if (type === "error") els.toast.classList.add("toast-error");
+  if (type === "warn") els.toast.classList.add("toast-warn");
+  els.toast.classList.add("show");
+
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(hideToast, duration);
+}
+
+function showErrorToast(message, options = {}) {
+  showToast(message, { ...options, type: "error" });
+}
+
+function showWarnToast(message, options = {}) {
+  showToast(message, { ...options, type: "warn" });
 }
 
 function setLoading(active, text = "正在处理…", progress = null) {
@@ -347,7 +463,7 @@ function startPrescriptionLoading() {
     : [
         { text: "正在验证问诊信息…", progress: 12 },
         { text: "正在匹配康复动作…", progress: 28 },
-        { text: "正在调用豆包大模型…", progress: 48 },
+        { text: "正在调用 DeepSeek 大模型…", progress: 48 },
         { text: "正在生成处方摘要…", progress: 68 },
         { text: "正在整理处方内容…", progress: 86 },
       ];
@@ -408,14 +524,30 @@ function goToStep(step) {
   if (step === "admin") {
     loadAdminActions();
   }
+  if (step === "knowledge") {
+    loadKnowledgePage();
+  }
+  if (step === "profiles") {
+    loadProfilesPage();
+  }
+  if (step === "library") {
+    loadActionLibrary();
+  }
+  if (step === "progress") {
+    loadProgressPage();
+  }
   if (step === "intake") {
     loadPatientProfiles();
+    loadImagingReports();
+    updateMobilityGuide();
+    hideRedFlagAlert();
     if (els.patientProfileSelect?.closest(".field")) {
       els.patientProfileSelect.closest(".field").hidden = window.APP_CONFIG.DEMO_MODE;
     }
   }
   if (step === "prescription") {
     updatePrescriptionExportBar();
+    updatePrescriptionFeedbackCard();
   }
 }
 
@@ -465,10 +597,10 @@ function renderPrescriptionRecap(formData) {
   els.prescriptionRecap.hidden = false;
   els.prescriptionRecap.innerHTML = `
     <dl class="recap-grid">
-      <dt>疼痛部位</dt><dd>${regions}</dd>
-      <dt>主诉</dt><dd>${formData.symptoms || "未填写"}</dd>
-      <dt>伤病史</dt><dd>${formData.history || "无"}</dd>
-      <dt>活动度自评</dt><dd><span class="recap-mobility recap-mobility-${mobility.tier}">${formData.mobility_score ?? "—"}/10 · ${mobility.label}</span></dd>
+      <dt>疼痛部位</dt><dd>${escapeHtml(regions)}</dd>
+      <dt>主诉</dt><dd>${escapeHtml(formData.symptoms || "未填写")}</dd>
+      <dt>伤病史</dt><dd>${escapeHtml(formData.history || "无")}</dd>
+      <dt>活动度自评</dt><dd><span class="recap-mobility recap-mobility-${escapeHtml(mobility.tier)}">${escapeHtml(formData.mobility_score ?? "—")}/10 · ${escapeHtml(mobility.label)}</span></dd>
     </dl>
   `;
 }
@@ -481,6 +613,58 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = window.APP_CONFIG
   } finally {
     window.clearTimeout(timer);
   }
+}
+
+// True when the backend API is available (not in Demo mode) and the user is logged in.
+function apiEnabled() {
+  return isSessionReady() && !window.APP_CONFIG.DEMO_MODE;
+}
+
+// True when the backend API is available regardless of login state.
+function apiReady() {
+  return !window.APP_CONFIG.DEMO_MODE;
+}
+
+// Guard for handlers that need both login and a live backend.
+// Shows a toast guiding the user and returns false; callers do `if (!requireApi()) return;`.
+function requireApi() {
+  if (window.APP_CONFIG.DEMO_MODE) {
+    showWarnToast("该功能需要切换到 API 模式并登录后使用");
+    return false;
+  }
+  return requireLogin();
+}
+
+// GET JSON with auth + timeout. Throws on non-2xx.
+async function apiGet(path, { timeoutMs } = {}) {
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}${path}`,
+    { headers: authHeaders() },
+    timeoutMs
+  );
+  if (!response.ok) throw new ApiError(`HTTP ${response.status}`, response);
+  return response.json();
+}
+
+// POST/PUT/DELETE with JSON body + auth + timeout. Returns parsed JSON (or null for empty).
+async function apiSend(method, path, body, { timeoutMs } = {}) {
+  const headers = authHeaders({ "Content-Type": "application/json" });
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}${path}`,
+    {
+      method,
+      headers,
+      body: body == null ? undefined : JSON.stringify(body),
+    },
+    timeoutMs
+  );
+  if (!response.ok) {
+    const detail = await parseApiError(response);
+    throw new ApiError(typeof detail === "string" ? detail : `${method} ${path} 失败`, response);
+  }
+  if (response.status === 204) return null;
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
 }
 
 function readFormData() {
@@ -554,17 +738,29 @@ function validateForm(formData) {
   els.painRegionsError.textContent = painRegionError || "";
   els.symptomsError.textContent = symptomError || "";
 
-  return !painRegionError && !symptomError;
+  if (painRegionError) {
+    focusIntakeField(document.querySelector(".pain-field") || els.painRegions);
+    return false;
+  }
+  if (symptomError) {
+    focusIntakeField(document.getElementById("symptoms"));
+    return false;
+  }
+  return true;
 }
 
-async function parseApiError(response) {
-  const raw = await response.text();
-  try {
-    const data = JSON.parse(raw);
-    return data.detail || raw;
-  } catch {
-    return raw || `HTTP ${response.status}`;
-  }
+function focusIntakeField(element) {
+  if (!element) return;
+  const collapsible = element.closest("details.intake-collapsible");
+  if (collapsible && !collapsible.open) collapsible.open = true;
+  window.requestAnimationFrame(() => {
+    element.scrollIntoView({ behavior: "smooth", block: "center" });
+    const focusTarget =
+      element.matches("textarea, input, select, button")
+        ? element
+        : element.querySelector("textarea, input, select, button");
+    focusTarget?.focus({ preventScroll: true });
+  });
 }
 
 function formatSummary(summary) {
@@ -669,13 +865,1056 @@ function hideDoubaoResult() {
 }
 
 function updateAdminEntry() {
+  const loggedIn = isSessionReady();
   const isAdmin = state.currentUser?.role === "admin";
   if (els.adminEntryButton) {
-    els.adminEntryButton.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
+    els.adminEntryButton.hidden = !isAdmin || !loggedIn;
   }
   if (els.adminQuickNav) {
     els.adminQuickNav.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
   }
+  if (els.profilesEntryButton) {
+    els.profilesEntryButton.hidden = !loggedIn;
+  }
+  if (els.libraryEntryButton) {
+    els.libraryEntryButton.hidden = !loggedIn;
+  }
+  if (els.goProgressButton) {
+    els.goProgressButton.hidden = !loggedIn;
+  }
+  if (els.knowledgeEntryButton) {
+    els.knowledgeEntryButton.hidden = !loggedIn;
+  }
+  if (els.imagingSectionWrap) {
+    els.imagingSectionWrap.hidden = window.APP_CONFIG.DEMO_MODE;
+  }
+}
+
+function hideRedFlagAlert() {
+  if (els.redFlagOverlay) {
+    els.redFlagOverlay.hidden = true;
+    els.redFlagOverlay.setAttribute("aria-hidden", "true");
+  }
+  if (els.redFlagMessage) els.redFlagMessage.innerHTML = "";
+  if (els.redFlagList) {
+    els.redFlagList.innerHTML = "";
+    els.redFlagList.hidden = true;
+  }
+}
+
+function formatRedFlagMessageHtml(message, redFlags = []) {
+  const labels =
+    redFlags.map((item) => item.label).filter(Boolean).join("、") ||
+    (message.match(/检测到红旗症状：([^。]+)/)?.[1] ?? "需立即就医的相关症状");
+  const rest = message.replace(/检测到红旗症状：[^。]+。?/, "").trim();
+  const urgentMatch = rest.match(/(请尽快.+)$/);
+  const urgentText = urgentMatch?.[1]?.trim() || "请尽快前往医院或咨询专业医生/康复治疗师。";
+  const bodyText = (urgentMatch ? rest.slice(0, urgentMatch.index) : rest)
+    .replace(/[，,]\s*$/, "")
+    .trim() || "为避免延误病情，系统已暂停生成普通居家康复训练处方";
+
+  return `
+    <p class="red-flag-lead">检测到红旗症状：</p>
+    <p class="red-flag-highlight">${escapeAdminText(labels)}</p>
+    <p class="red-flag-body">${escapeAdminText(bodyText)}</p>
+    <p class="red-flag-urgent">${escapeAdminText(urgentText)}</p>
+  `;
+}
+
+function showRedFlagAlert(message, redFlags = []) {
+  if (!els.redFlagOverlay) return;
+  els.redFlagOverlay.hidden = false;
+  els.redFlagOverlay.setAttribute("aria-hidden", "false");
+  if (els.redFlagMessage) {
+    els.redFlagMessage.innerHTML = formatRedFlagMessageHtml(message || "", redFlags);
+  }
+  if (els.redFlagList) {
+    const extraFlags = (redFlags || []).filter(
+      (item) => !message?.includes(item.label || "")
+    );
+    if (extraFlags.length) {
+      els.redFlagList.hidden = false;
+      els.redFlagList.innerHTML = extraFlags
+        .map((item) => `<li>${escapeAdminText(item.label || item.code || "未知风险")}</li>`)
+        .join("");
+    } else {
+      els.redFlagList.innerHTML = "";
+      els.redFlagList.hidden = true;
+    }
+  }
+}
+
+function updateMobilitySummary(score) {
+  const tier = getMobilityTier(score);
+  const shortLabel = tier.label.split(" · ")[0] || tier.label;
+  if (els.mobilitySummary) {
+    els.mobilitySummary.textContent = `${score}/10 · ${shortLabel}`;
+  }
+}
+
+function updateMobilityGuide() {
+  if (!els.mobilityGuideCards) return;
+  const regions = Array.from(state.selectedPainRegions);
+  const guides = regions.length
+    ? regions.map((region) => ({
+        region,
+        ...(window.APP_CONFIG.MOBILITY_GUIDES[region] || window.APP_CONFIG.DEFAULT_MOBILITY_GUIDE),
+      }))
+    : [{ region: "通用", ...window.APP_CONFIG.DEFAULT_MOBILITY_GUIDE }];
+
+  els.mobilityGuideCards.innerHTML = guides
+    .map(
+      (guide) => `
+      <article class="mobility-guide-card">
+        <div class="guide-icon">${escapeAdminText(guide.icon || "📋")}</div>
+        <h4>${escapeAdminText(guide.title)}${guide.region && guide.region !== "通用" ? ` · ${escapeAdminText(guide.region)}` : ""}</h4>
+        <p>${escapeAdminText(guide.instruction)}</p>
+      </article>`
+    )
+    .join("");
+}
+
+function updateMobilityTierDisplay(score) {
+  const tier = getMobilityTier(score);
+  if (els.mobilityTier) els.mobilityTier.textContent = tier.label;
+  updateMobilitySummary(score);
+}
+
+function applyPatientProfileToIntake(profile) {
+  if (!profile) return;
+  const historyField = document.getElementById("history");
+  if (historyField && profile.history) historyField.value = profile.history;
+  state.selectedPainRegions.clear();
+  (profile.pain_regions || []).forEach((region) => state.selectedPainRegions.add(region));
+  els.painRegions?.querySelectorAll(".chip").forEach((chip) => {
+    chip.classList.toggle("selected", state.selectedPainRegions.has(chip.textContent));
+  });
+  updateMobilityGuide();
+}
+
+function readProfileFormPayload() {
+  return {
+    name: document.getElementById("profile-name")?.value.trim() || "",
+    gender: document.getElementById("profile-gender")?.value || null,
+    age: document.getElementById("profile-age")?.value ? Number(document.getElementById("profile-age").value) : null,
+    phone: document.getElementById("profile-phone")?.value.trim() || null,
+    height_cm: document.getElementById("profile-height")?.value ? Number(document.getElementById("profile-height").value) : null,
+    weight_kg: document.getElementById("profile-weight")?.value ? Number(document.getElementById("profile-weight").value) : null,
+    pain_regions: Array.from(state.profileFormRegions),
+    history: document.getElementById("profile-history")?.value.trim() || null,
+    surgery_history: document.getElementById("profile-surgery")?.value.trim() || null,
+    allergy_history: document.getElementById("profile-allergy")?.value.trim() || null,
+    rehab_goal: document.getElementById("profile-goal")?.value.trim() || null,
+    note: document.getElementById("profile-note")?.value.trim() || null,
+  };
+}
+
+function resetProfileForm() {
+  state.profileFormRegions.clear();
+  document.getElementById("profile-edit-id").value = "";
+  document.getElementById("profile-form-title").textContent = "新建健康档案";
+  els.profileForm?.reset();
+  els.profilePainRegions?.querySelectorAll(".chip").forEach((chip) => chip.classList.remove("selected"));
+  if (els.profileFormCard) els.profileFormCard.hidden = true;
+}
+
+function fillProfileForm(profile) {
+  document.getElementById("profile-edit-id").value = profile.id;
+  document.getElementById("profile-form-title").textContent = `编辑档案：${profile.name}`;
+  document.getElementById("profile-name").value = profile.name || "";
+  document.getElementById("profile-gender").value = profile.gender || "";
+  document.getElementById("profile-age").value = profile.age ?? "";
+  document.getElementById("profile-phone").value = profile.phone || "";
+  document.getElementById("profile-height").value = profile.height_cm ?? "";
+  document.getElementById("profile-weight").value = profile.weight_kg ?? "";
+  document.getElementById("profile-history").value = profile.history || "";
+  document.getElementById("profile-surgery").value = profile.surgery_history || "";
+  document.getElementById("profile-allergy").value = profile.allergy_history || "";
+  document.getElementById("profile-goal").value = profile.rehab_goal || "";
+  document.getElementById("profile-note").value = profile.note || "";
+  state.profileFormRegions = new Set(profile.pain_regions || []);
+  els.profilePainRegions?.querySelectorAll(".chip").forEach((chip) => {
+    chip.classList.toggle("selected", state.profileFormRegions.has(chip.textContent));
+  });
+  if (els.profileFormCard) els.profileFormCard.hidden = false;
+}
+
+function renderProfileCard(profile) {
+  const regions = (profile.pain_regions || []).join("、") || "未填写";
+  return `
+    <article class="profile-card" data-profile-id="${profile.id}">
+      <div class="profile-card-head">
+        <div>
+          <h3>${escapeAdminText(profile.name)}${profile.age ? ` · ${profile.age}岁` : ""}</h3>
+          <p class="hint">${escapeAdminText(profile.gender || "性别未填")}${profile.phone ? ` · ${escapeAdminText(profile.phone)}` : ""}</p>
+        </div>
+        <div class="profile-card-actions">
+          <button class="btn btn-secondary btn-small profile-use-btn" type="button" data-profile-id="${profile.id}">用于问诊</button>
+          <button class="btn btn-secondary btn-small profile-edit-btn" type="button" data-profile-id="${profile.id}">编辑</button>
+          <button class="btn btn-secondary btn-small profile-delete-btn" type="button" data-profile-id="${profile.id}">删除</button>
+        </div>
+      </div>
+      <div class="profile-meta-grid">
+        <span>疼痛部位：${escapeAdminText(regions)}</span>
+        <span>伤病史：${escapeAdminText(profile.history || "无")}</span>
+        <span>手术史：${escapeAdminText(profile.surgery_history || "无")}</span>
+        <span>过敏史：${escapeAdminText(profile.allergy_history || "无")}</span>
+      </div>
+      ${profile.rehab_goal ? `<p class="hint" style="margin-top:8px">康复目标：${escapeAdminText(profile.rehab_goal)}</p>` : ""}
+    </article>`;
+}
+
+async function loadProfilesPage() {
+  if (!els.profilesList) return;
+  if (window.APP_CONFIG.DEMO_MODE) {
+    renderDemoNotice(els.profilesList, { featureName: "健康档案" });
+    return;
+  }
+  if (!isSessionReady()) {
+    els.profilesList.innerHTML = "<p class=\"hint\">请先登录后查看健康档案。</p>";
+    return;
+  }
+  els.profilesList.innerHTML = "<p class=\"hint\">正在加载…</p>";
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/patient_profiles`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.patientProfiles = await response.json();
+    renderPatientProfileSelect();
+    if (!state.patientProfiles.length) {
+      els.profilesList.innerHTML = "<p class=\"hint\">暂无健康档案，可点击「新建档案」添加。</p>";
+      return;
+    }
+    els.profilesList.innerHTML = state.patientProfiles.map(renderProfileCard).join("");
+  } catch {
+    renderLoadError(els.profilesList, {
+      message: "健康档案加载失败，请确认后端已启动后重试。",
+      onRetry: loadProfilesPage,
+    });
+  }
+}
+
+async function saveProfileForm(event) {
+  event.preventDefault();
+  if (!requireLogin()) return;
+  const payload = readProfileFormPayload();
+  if (!payload.name) {
+    showToast("请填写姓名");
+    return;
+  }
+  const editId = document.getElementById("profile-edit-id")?.value;
+  const url = editId
+    ? `${window.APP_CONFIG.API_BASE}/patient_profiles/${editId}`
+    : `${window.APP_CONFIG.API_BASE}/patient_profiles`;
+  const response = await fetchWithTimeout(url, {
+    method: editId ? "PUT" : "POST",
+    headers: authHeaders({ "Content-Type": "application/json" }),
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    showErrorToast("档案保存失败");
+    return;
+  }
+  const profile = await response.json();
+  showToast(editId ? "档案已更新" : "档案已创建");
+  resetProfileForm();
+  await loadPatientProfiles();
+  await loadProfilesPage();
+  if (!editId) {
+    state.selectedPatientProfileId = profile.id;
+    renderPatientProfileSelect();
+  }
+}
+
+async function deleteProfile(profileId) {
+  if (!window.confirm("确定删除该健康档案？")) return;
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/patient_profiles/${profileId}`,
+    { method: "DELETE", headers: authHeaders() }
+  );
+  if (!response.ok) {
+    showErrorToast("删除失败");
+    return;
+  }
+  if (state.selectedPatientProfileId === profileId) state.selectedPatientProfileId = null;
+  showToast("档案已删除");
+  await loadPatientProfiles();
+  await loadProfilesPage();
+}
+
+function renderImagingReportCard(report) {
+  const riskClass = report.risk_level === "high" ? "risk-high" : "";
+  const ocrText = report.ocr_text || "";
+  const uniqueFlags = (report.red_flags || []).filter((item, index, list) => {
+    const label = item.label || "";
+    if (!label) return false;
+    if (ocrText.includes(label)) return false;
+    return list.findIndex((other) => other.label === label) === index;
+  });
+  const flags = uniqueFlags
+    .map((item) => `<li>${escapeAdminText(item.label || item.code)}</li>`)
+    .join("");
+  const createdAt = report.created_at
+    ? escapeAdminText(String(report.created_at).slice(0, 19).replace("T", " "))
+    : "";
+  return `
+    <article class="imaging-report-card ${riskClass}" data-report-id="${report.id}">
+      <div class="imaging-report-head">
+        <div>
+          <strong>${escapeAdminText(report.report_type || "影像报告")}</strong>
+          ${report.file_name ? ` · ${escapeAdminText(report.file_name)}` : ""}
+          ${createdAt ? `<span class="hint"> · ${createdAt}</span>` : ""}
+        </div>
+        <button class="btn btn-secondary btn-small imaging-delete-btn" type="button" data-report-id="${report.id}">删除</button>
+      </div>
+      <p class="hint">OCR：${escapeAdminText(report.ocr_status)} · 风险：${escapeAdminText(report.risk_level)}</p>
+      ${ocrText ? `<p class="imaging-ocr-text">${escapeAdminText(ocrText.slice(0, 220))}${ocrText.length > 220 ? "…" : ""}</p>` : ""}
+      ${flags ? `<ul class="red-flag-list imaging-flag-list">${flags}</ul>` : ""}
+    </article>`;
+}
+
+async function deleteImagingReport(reportId) {
+  if (!requireApi()) return;
+  if (!window.confirm("确定删除该影像报告记录？")) return;
+  const response = await fetchWithTimeout(
+    `${window.APP_CONFIG.API_BASE}/imaging_reports/${reportId}`,
+    { method: "DELETE", headers: authHeaders() }
+  );
+  if (!response.ok) {
+    showErrorToast("删除失败");
+    return;
+  }
+  showToast("影像报告已删除");
+  await loadImagingReports();
+}
+
+function bindImagingReportEvents() {
+  if (els.imagingReportsList?.dataset.bound === "true") return;
+  if (els.imagingReportsList) els.imagingReportsList.dataset.bound = "true";
+  els.imagingReportsList?.addEventListener("click", async (event) => {
+    const button = event.target.closest(".imaging-delete-btn");
+    if (!button) return;
+    await deleteImagingReport(Number(button.dataset.reportId));
+  });
+}
+
+async function loadImagingReports() {
+  if (!els.imagingReportsList || !isSessionReady() || window.APP_CONFIG.DEMO_MODE) return;
+  try {
+    const params = state.selectedPatientProfileId
+      ? `?patient_profile_id=${state.selectedPatientProfileId}`
+      : "";
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/imaging_reports${params}`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const reports = await response.json();
+    const seen = new Set();
+    state.imagingReports = reports.filter((report) => {
+      if (seen.has(report.id)) return false;
+      seen.add(report.id);
+      return true;
+    });
+    if (!state.imagingReports.length) {
+      els.imagingReportsList.innerHTML = "<p class=\"hint\">暂无影像报告记录。</p>";
+      return;
+    }
+    els.imagingReportsList.innerHTML = state.imagingReports.map(renderImagingReportCard).join("");
+  } catch {
+    renderLoadError(els.imagingReportsList, {
+      message: "影像报告加载失败，请确认后端已启动后重试。",
+      onRetry: loadImagingReports,
+    });
+  }
+}
+
+async function uploadImagingReport() {
+  if (!requireApi()) return;
+  const fileInput = document.getElementById("imaging-file");
+  const ocrText = document.getElementById("imaging-ocr-text")?.value.trim();
+  const note = document.getElementById("imaging-note")?.value.trim();
+  const reportType = document.getElementById("imaging-report-type")?.value || "影像报告";
+  const file = fileInput?.files?.[0];
+
+  if (!file && !ocrText) {
+    showToast("请上传文本报告或粘贴报告内容");
+    return;
+  }
+
+  const payload = {
+    patient_profile_id: state.selectedPatientProfileId,
+    report_type: reportType,
+    note: note || null,
+    ocr_text: ocrText || null,
+  };
+
+  if (file) {
+    const buffer = await file.arrayBuffer();
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    bytes.forEach((byte) => {
+      binary += String.fromCharCode(byte);
+    });
+    payload.file_name = file.name;
+    payload.file_content_base64 = btoa(binary);
+    if (!ocrText && /\.(txt|md)$/i.test(file.name)) {
+      payload.ocr_text = await file.text();
+    }
+  }
+
+  setLoading(true, "正在上传并分析影像报告…");
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/imaging_reports`, {
+      method: "POST",
+      headers: authHeaders({ "Content-Type": "application/json" }),
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const detail = await parseApiError(response);
+      showErrorToast(detail || "上传失败");
+      return;
+    }
+    const report = await response.json();
+    if (report.red_flags?.length) {
+      showRedFlagAlert("影像报告检测到红旗症状，建议尽快就医评估。", report.red_flags);
+    }
+    showToast("影像报告已上传");
+    if (fileInput) fileInput.value = "";
+    document.getElementById("imaging-ocr-text").value = "";
+    document.getElementById("imaging-note").value = "";
+    await loadImagingReports();
+  } catch {
+    showErrorToast("影像报告上传失败");
+  } finally {
+    setLoading(false);
+  }
+}
+
+function renderActionMetaTags(action) {
+  const parts = [];
+  if (action.sets) parts.push(`${action.sets} 组`);
+  if (action.reps) parts.push(`${action.reps} 次/组`);
+  if (action.frequency) parts.push(action.frequency);
+  if (action.difficulty_level) {
+    let cls = "tag-difficulty";
+    if (action.difficulty_level === "中级") cls += " mid";
+    if (action.difficulty_level === "高级") cls += " advanced";
+    parts.push(`<span class="tag ${cls}">${escapeAdminText(action.difficulty_level)}</span>`);
+  }
+  if (action.category) parts.push(`<span class="tag">${escapeAdminText(action.category)}</span>`);
+  return parts.map((p) => (p.startsWith("<span") ? p : `<span class="tag">${escapeAdminText(p)}</span>`)).join("");
+}
+
+function setDemoCollapsible(id, visible, summaryText) {
+  const details = document.getElementById(id);
+  if (!details) return;
+  details.hidden = !visible;
+  if (!visible) {
+    details.open = false;
+    return;
+  }
+  const summary = details.querySelector("summary");
+  if (summary && summaryText) summary.textContent = summaryText;
+}
+
+function renderActionDetailSections(action) {
+  const stepsEl = document.getElementById("demo-action-steps");
+  const comparisonsEl = document.getElementById("demo-error-comparisons");
+  const fallbackEl = document.getElementById("demo-mistake-fallback");
+  const mistakesEl = document.getElementById("demo-common-mistakes");
+  const cuesEl = document.getElementById("demo-correct-cues");
+  const difficultyCurrent = document.getElementById("demo-difficulty-current");
+  const difficultyProfilesEl = document.getElementById("demo-difficulty-profiles");
+
+  const steps = action.steps || [];
+  setDemoCollapsible("demo-steps-collapsible", steps.length > 0, `分步要领（${steps.length} 步）`);
+  if (stepsEl) stepsEl.innerHTML = steps.map((step) => `<li>${escapeAdminText(step)}</li>`).join("");
+
+  const comparisons = action.error_comparisons || [];
+  if (comparisonsEl && fallbackEl) {
+    if (comparisons.length) {
+      comparisonsEl.hidden = false;
+      fallbackEl.hidden = true;
+      comparisonsEl.innerHTML = comparisons
+        .map(
+          (item) => `
+        <article class="error-comparison-card">
+          <div class="error-comparison-row mistake-wrong">
+            <span class="error-comparison-label">❌ 常见错误</span>
+            <p>${escapeAdminText(item.mistake || "")}</p>
+          </div>
+          <div class="error-comparison-row mistake-right">
+            <span class="error-comparison-label">✅ 正确要点</span>
+            <p>${escapeAdminText(item.correct || "")}</p>
+          </div>
+          ${item.risk ? `<p class="hint error-comparison-risk">风险：${escapeAdminText(item.risk)}</p>` : ""}
+        </article>`
+        )
+        .join("");
+      setDemoCollapsible(
+        "demo-mistakes-collapsible",
+        true,
+        `常见错误动作对比（${comparisons.length} 项）`
+      );
+    } else {
+      comparisonsEl.innerHTML = "";
+      comparisonsEl.hidden = true;
+      const mistakes = action.common_mistakes || [];
+      const cues = action.correct_cues || [];
+      fallbackEl.hidden = !mistakes.length && !cues.length;
+      if (mistakesEl) mistakesEl.innerHTML = mistakes.map((item) => `<li>${escapeAdminText(item)}</li>`).join("");
+      if (cuesEl) cuesEl.innerHTML = cues.map((item) => `<li>${escapeAdminText(item)}</li>`).join("");
+      setDemoCollapsible(
+        "demo-mistakes-collapsible",
+        mistakes.length > 0 || cues.length > 0,
+        "常见错误 vs 正确要点"
+      );
+    }
+  }
+
+  const profiles = action.difficulty_profiles || [];
+  setDemoCollapsible("demo-difficulty-collapsible", profiles.length > 0, "难度分级（初 / 中 / 高）");
+  if (difficultyProfilesEl) {
+    if (difficultyCurrent) {
+      difficultyCurrent.textContent = action.difficulty_level
+        ? `当前推荐难度：${action.difficulty_level}（下方三档为可执行的初/中/高训练方案）`
+        : "以下为初、中、高三个难度档位的训练参数参考。";
+    }
+    difficultyProfilesEl.innerHTML = profiles
+      .map((profile) => {
+        const active = profile.level === action.difficulty_level ? " is-current" : "";
+        const levelClass =
+          profile.level === "中级" ? " mid" : profile.level === "高级" ? " advanced" : "";
+        return `
+        <article class="difficulty-profile-card${active}">
+          <h4><span class="tag tag-difficulty${levelClass}">${escapeAdminText(profile.level || "难度")}</span>${active ? " · 推荐" : ""}</h4>
+          <p><strong>${profile.sets ?? "-"}</strong> 组 × <strong>${profile.reps ?? "-"}</strong> 次</p>
+          ${profile.tempo ? `<p class="hint">${escapeAdminText(profile.tempo)}</p>` : ""}
+          ${profile.guidance ? `<p>${escapeAdminText(profile.guidance)}</p>` : ""}
+        </article>`;
+      })
+      .join("");
+  }
+
+  setDemoCollapsible(
+    "demo-contraindications-collapsible",
+    Boolean(action.contraindications),
+    "禁忌事项"
+  );
+  setDemoCollapsible(
+    "demo-progression-collapsible",
+    Boolean(action.progression),
+    "进阶条件"
+  );
+}
+
+async function fetchActionDetail(action) {
+  const actionId = action?.id || action?.backendId;
+  if (!actionId || window.APP_CONFIG.DEMO_MODE) {
+    return window.MockService.enrichAction(action);
+  }
+  try {
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/actions/${encodeURIComponent(actionId)}`
+    );
+    if (!response.ok) return window.MockService.enrichAction(action);
+    return window.MockService.enrichAction(await response.json());
+  } catch {
+    return window.MockService.enrichAction(action);
+  }
+}
+
+function filterActionLibrary(actions) {
+  const { q, bodyRegion, difficulty } = state.libraryFilters;
+  return actions.filter((action) => {
+    if (bodyRegion && !(action.body_regions || []).includes(bodyRegion)) return false;
+    if (difficulty && action.difficulty_level !== difficulty) return false;
+    if (q) {
+      const haystack = [
+        action.name,
+        action.id,
+        action.description,
+        ...(action.body_regions || []),
+        ...(action.target_conditions || []),
+      ]
+        .join(" ")
+        .toLowerCase();
+      if (!haystack.includes(q.toLowerCase())) return false;
+    }
+    return true;
+  });
+}
+
+function renderLibraryActionCard(action) {
+  const poseSupported = window.APP_CONFIG.isPoseSupported(action.id);
+  return `
+    <article class="action-card card">
+      <div class="action-image-wrap">
+        <img src="${window.APP_CONFIG.assetUrl(action.image)}" alt="${escapeAdminText(action.name)}示意图" loading="lazy" onerror="handleActionImageError(this)" />
+        <span class="action-image-placeholder">示意图待上传</span>
+      </div>
+      <div class="action-card-body">
+        <h3>${escapeAdminText(action.name)}</h3>
+        <div class="action-meta">${renderActionMetaTags(action)}</div>
+        <p>${escapeAdminText(action.description || "")}</p>
+        <p class="hint">${escapeAdminText((action.body_regions || []).join("、"))}${action.stage ? ` · ${escapeAdminText(action.stage)}` : ""}</p>
+        <button class="btn btn-primary btn-small library-view-demo" type="button" data-action-id="${escapeAdminText(action.id || "")}">
+          查看详情${poseSupported ? " / 跟练" : ""}
+        </button>
+      </div>
+    </article>`;
+}
+
+async function loadActionLibrary() {
+  if (!els.libraryGrid) return;
+  els.libraryGrid.innerHTML = "<p class=\"hint\">正在加载动作库…</p>";
+  try {
+    if (window.APP_CONFIG.DEMO_MODE) {
+      state.actionLibrary = Object.values(window.ACTION_CATALOG).map((item) =>
+        window.MockService.enrichAction(item)
+      );
+    } else {
+      const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/actions`);
+      if (!response.ok) throw new Error("actions unavailable");
+      const data = await response.json();
+      state.actionLibrary = data.map((action) => window.MockService.enrichAction(action));
+    }
+    populateLibraryRegionFilter();
+    renderActionLibraryGrid();
+  } catch {
+    renderLoadError(els.libraryGrid, { message: "动作库加载失败，请确认后端已启动。", onRetry: loadActionLibrary });
+  }
+}
+
+function populateLibraryRegionFilter() {
+  const select = document.getElementById("library-filter-region");
+  if (!select) return;
+  const regions = new Set();
+  state.actionLibrary.forEach((action) => (action.body_regions || []).forEach((r) => regions.add(r)));
+  const current = select.value;
+  select.innerHTML = `<option value="">全部部位</option>${Array.from(regions)
+    .sort()
+    .map((region) => `<option value="${escapeAdminText(region)}">${escapeAdminText(region)}</option>`)
+    .join("")}`;
+  select.value = current;
+}
+
+function renderActionLibraryGrid() {
+  if (!els.libraryGrid) return;
+  const filtered = filterActionLibrary(state.actionLibrary);
+  if (!filtered.length) {
+    els.libraryGrid.innerHTML = "<p class=\"hint\">没有匹配的动作。</p>";
+    return;
+  }
+  els.libraryGrid.innerHTML = filtered.map(renderLibraryActionCard).join("");
+  els.libraryGrid.querySelectorAll(".library-view-demo").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = state.actionLibrary.find((item) => item.id === button.dataset.actionId);
+      if (action) void showDemo(action);
+    });
+  });
+}
+
+// ── M5: Voice cue ──
+let lastVoiceAnnouncedText = "";
+let voiceSpeaking = false;
+let pendingVoiceCue = null;
+
+function setVoiceCueText(text) {
+  const textEl = document.getElementById("voice-cue-text");
+  if (textEl && text) textEl.textContent = text;
+}
+
+function resetVoiceCueState() {
+  lastVoiceAnnouncedText = "";
+  pendingVoiceCue = null;
+  voiceSpeaking = false;
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+}
+
+function normalizeVoiceFeedbackText(feedback) {
+  if (feedback == null) return "动作已记录，请保持稳定呼吸。";
+  const items = Array.isArray(feedback) ? feedback.filter(Boolean) : [String(feedback)];
+  const text = items.slice(0, 2).join("；").trim();
+  return text || "动作已记录，请保持稳定呼吸。";
+}
+
+function pickChineseSpeechVoice() {
+  if (!("speechSynthesis" in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find((voice) => voice.lang === "zh-CN") ||
+    voices.find((voice) => voice.lang.startsWith("zh")) ||
+    null
+  );
+}
+
+function primeSpeechSynthesis() {
+  if (!("speechSynthesis" in window)) return false;
+  window.speechSynthesis.getVoices();
+  if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+  return true;
+}
+
+function flushPendingVoiceCue() {
+  if (!pendingVoiceCue || voiceSpeaking) return;
+  const next = pendingVoiceCue;
+  pendingVoiceCue = null;
+  if (next.text === lastVoiceAnnouncedText) return;
+  lastVoiceAnnouncedText = next.text;
+  startVoiceUtterance(next.text, next.rate);
+}
+
+function startVoiceUtterance(text, rate = 1) {
+  if (!text || !("speechSynthesis" in window)) return;
+
+  const speakNow = () => {
+    voiceSpeaking = true;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "zh-CN";
+    utterance.rate = rate;
+    utterance.volume = 1;
+    const voice = pickChineseSpeechVoice();
+    if (voice) utterance.voice = voice;
+    const finish = () => {
+      voiceSpeaking = false;
+      flushPendingVoiceCue();
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    window.speechSynthesis.resume();
+    window.speechSynthesis.speak(utterance);
+  };
+
+  if (window.speechSynthesis.getVoices().length) {
+    speakNow();
+  } else {
+    window.speechSynthesis.addEventListener("voiceschanged", speakNow, { once: true });
+    primeSpeechSynthesis();
+  }
+}
+
+/** Short UI prompt (e.g. toggle on); does not affect pose cue dedupe. */
+function speakVoicePrompt(text, rate = 1) {
+  if (!text || !("speechSynthesis" in window)) return;
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  voiceSpeaking = false;
+  pendingVoiceCue = null;
+  startVoiceUtterance(text, rate);
+}
+
+function playVoiceCue(feedback, status, score, voiceCue) {
+  const text = voiceCue?.text || normalizeVoiceFeedbackText(feedback);
+  setVoiceCueText(text);
+
+  if (!state.voiceEnabled) return;
+  // Each distinct cue is spoken at most once until the message changes.
+  if (text === lastVoiceAnnouncedText) return;
+
+  const rate = voiceCue?.rate || (status === "error" || (typeof score === "number" && score < 45) ? 0.92 : 1);
+
+  if (voiceSpeaking) {
+    pendingVoiceCue = { text, rate };
+    return;
+  }
+
+  lastVoiceAnnouncedText = text;
+  startVoiceUtterance(text, rate);
+}
+
+function syncVoiceToggleUi() {
+  const btn = document.getElementById("toggle-voice");
+  if (btn) btn.textContent = state.voiceEnabled ? "关闭语音播报" : "开启语音播报";
+  const indicator = document.getElementById("voice-indicator");
+  if (indicator) indicator.classList.toggle("active", state.voiceEnabled);
+}
+
+function toggleVoice() {
+  if (!("speechSynthesis" in window)) {
+    showWarnToast("当前浏览器不支持语音播报");
+    return;
+  }
+  primeSpeechSynthesis();
+  state.voiceEnabled = !state.voiceEnabled;
+  syncVoiceToggleUi();
+  if (state.voiceEnabled) {
+    setVoiceCueText("语音播报已开启");
+    speakVoicePrompt("语音播报已开启");
+  } else {
+    resetVoiceCueState();
+    setVoiceCueText("语音播报已关闭，纠错文字仍会显示");
+  }
+}
+
+// ── M5: Training counter ──
+function startTrainingCounter() {
+  state.trainingStartTime = Date.now();
+  state.trainingRepCount = 0;
+  state.trainingSetCount = 0;
+  state.lastRepStatus = null;
+  updateCounterDisplay();
+  if (state.trainingTimer) clearInterval(state.trainingTimer);
+  state.trainingTimer = setInterval(updateCounterDisplay, 1000);
+}
+
+function stopTrainingCounter() {
+  if (state.trainingTimer) { clearInterval(state.trainingTimer); state.trainingTimer = null; }
+}
+
+function updateCounterDisplay() {
+  const elapsed = state.trainingStartTime ? Math.floor((Date.now() - state.trainingStartTime) / 1000) : 0;
+  const mins = Math.floor(elapsed / 60);
+  const secs = elapsed % 60;
+  const durationEl = document.getElementById("counter-duration");
+  const repsEl = document.getElementById("counter-reps");
+  const setsEl = document.getElementById("counter-sets");
+  if (durationEl) durationEl.textContent = `${mins}:${String(secs).padStart(2, "0")}`;
+  if (repsEl) repsEl.textContent = String(state.trainingRepCount);
+  if (setsEl) setsEl.textContent = String(state.trainingSetCount);
+}
+
+function countRep(status) {
+  if (status === "ok" && state.lastRepStatus !== "ok") {
+    state.trainingRepCount++;
+    const targetReps = state.currentAction?.reps || 10;
+    if (state.trainingRepCount > 0 && state.trainingRepCount % targetReps === 0) {
+      state.trainingSetCount++;
+    }
+    updateCounterDisplay();
+  }
+  state.lastRepStatus = status;
+}
+
+// ── M6: Progress tracking page ──
+async function loadProgressPage() {
+  if (!apiEnabled()) {
+    renderDemoNotice(els.progressStatsGrid, { featureName: "康复进度追踪" });
+    if (els.progressVasChart) els.progressVasChart.innerHTML = "";
+    if (els.progressCompletion) els.progressCompletion.innerHTML = "";
+    if (els.progressReport) els.progressReport.innerHTML = "";
+    return;
+  }
+  await Promise.all([loadProgressStats(), loadProgressReport()]);
+}
+
+async function loadProgressStats() {
+  const grid = els.progressStatsGrid;
+  const vasChart = els.progressVasChart;
+  const completionEl = els.progressCompletion;
+  if (!grid) return;
+  grid.innerHTML = '<p class="hint">正在加载…</p>';
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/visualization?days=30`, { headers: authHeaders() });
+    if (!response.ok) throw new Error();
+    const data = await response.json();
+    const trend = data.trend?.points || [];
+    grid.innerHTML = `
+      <div class="progress-stat-card"><span class="progress-stat-value">${data.total_checkins}</span><span class="progress-stat-label">打卡次数</span></div>
+      <div class="progress-stat-card"><span class="progress-stat-value">${data.active_days}</span><span class="progress-stat-label">活跃天数</span></div>
+      <div class="progress-stat-card"><span class="progress-stat-value">${data.avg_score ?? "—"}</span><span class="progress-stat-label">平均得分</span></div>
+      <div class="progress-stat-card"><span class="progress-stat-value">${data.avg_pain_change != null ? (data.avg_pain_change > 0 ? "+" : "") + data.avg_pain_change.toFixed(1) : "—"}</span><span class="progress-stat-label">疼痛变化</span></div>
+    `;
+    if (vasChart && trend.length) {
+      const maxPain = 10;
+      const barW = Math.max(20, Math.min(60, Math.floor(600 / trend.length)));
+      vasChart.innerHTML = `
+        <div class="vas-chart">
+          ${trend.map(p => {
+            const before = p.avg_pain_before ?? 0;
+            const after = p.avg_pain_after ?? 0;
+            return `<div class="vas-bar-group" style="width:${barW}px">
+              <div class="vas-bars">
+                <div class="vas-bar vas-before" style="height:${(before / maxPain) * 100}%" title="训练前:${before.toFixed(1)}"></div>
+                <div class="vas-bar vas-after" style="height:${(after / maxPain) * 100}%" title="训练后:${after.toFixed(1)}"></div>
+              </div>
+              <span class="vas-date">${p.date?.slice(5) || ""}</span>
+            </div>`;
+          }).join("")}
+        </div>
+        <div class="vas-legend"><span class="vas-legend-item"><span class="vas-dot vas-before"></span>训练前</span><span class="vas-legend-item"><span class="vas-dot vas-after"></span>训练后</span></div>
+      `;
+    } else if (vasChart) {
+      vasChart.innerHTML = '<p class="hint">暂无疼痛记录数据</p>';
+    }
+    if (completionEl && trend.length) {
+      const totalDays = trend.length;
+      const activeDays = trend.filter(p => p.checkin_count > 0).length;
+      const rate = totalDays > 0 ? Math.round((activeDays / totalDays) * 100) : 0;
+      completionEl.innerHTML = `
+        <div class="completion-bar-wrap"><div class="completion-bar" style="width:${rate}%"></div></div>
+        <p>${activeDays}/${totalDays} 天完成训练 · 完成率 <strong>${rate}%</strong></p>
+      `;
+    }
+  } catch {
+    renderLoadError(grid, { message: "进度数据加载失败，请确认后端已启动后重试。", onRetry: loadProgressStats });
+  }
+}
+
+async function loadProgressReport() {
+  const reportEl = els.progressReport;
+  const actionsEl = els.progressReportActions;
+  if (!reportEl) return;
+  reportEl.innerHTML = '<p class="hint">正在生成周报…</p>';
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/report?period=week`, { headers: authHeaders() });
+    if (!response.ok) throw new Error();
+    const r = await response.json();
+    reportEl.innerHTML = `
+      <p><strong>周期：</strong>${r.start_date} 至 ${r.end_date}</p>
+      <p><strong>完成率：</strong>${(r.completion_rate * 100).toFixed(0)}%（${r.active_days}/${r.expected_days} 天）</p>
+      <p><strong>平均得分：</strong>${r.avg_score ?? "—"}</p>
+      <p><strong>疼痛变化：</strong>${r.vas_summary || "暂无"}</p>
+      ${r.action_summaries?.length ? `<h4>动作统计</h4><ul>${r.action_summaries.map(a => `<li>${escapeAdminText(a.action_name)}：${a.count} 次${a.avg_score != null ? `，均分 ${a.avg_score}` : ""}</li>`).join("")}</ul>` : ""}
+      ${r.highlights?.length ? `<h4>亮点</h4><ul>${r.highlights.map(h => `<li>${escapeAdminText(h)}</li>`).join("")}</ul>` : ""}
+      ${r.risks?.length ? `<h4>风险</h4><ul>${r.risks.map(h => `<li>${escapeAdminText(h)}</li>`).join("")}</ul>` : ""}
+      ${r.recommendations?.length ? `<h4>建议</h4><ul>${r.recommendations.map(h => `<li>${escapeAdminText(h)}</li>`).join("")}</ul>` : ""}
+    `;
+    if (actionsEl) actionsEl.hidden = false;
+  } catch {
+    reportEl.innerHTML = '<p class="hint">周报生成失败，请确认有训练打卡记录。</p>';
+  }
+}
+
+async function exportProgressReport() {
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/report/export?period=week&format=markdown`, { headers: authHeaders() });
+    if (!response.ok) throw new Error();
+    const text = await response.text();
+    const blob = new Blob([text], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "康复周报.md"; a.click();
+    URL.revokeObjectURL(url);
+    showToast("周报已导出");
+  } catch { showErrorToast("周报导出失败"); }
+}
+
+// ── M7: Knowledge education page ──
+// Page logic lives in pages/knowledge.js as a factory (createKnowledgePage)
+// to keep this file focused on wiring. Dependencies (state, els, api helpers,
+// ui helpers) are injected via the ctx object so the page module has no
+// global coupling. The thin wrappers below keep call sites in goToStep /
+// bindEvents unchanged.
+const knowledgePage = createKnowledgePage({
+  state,
+  els,
+  apiGet,
+  apiSend,
+  escapeHtml,
+  renderLoadError,
+  showToast,
+});
+const loadKnowledgePage = knowledgePage.loadKnowledgePage;
+const switchKnowledgeTab = knowledgePage.switchKnowledgeTab;
+// Debounced reload for the keyword filter input.
+const knowledgeFilterDebounced = debounce(() => loadKnowledgePage(), 300);
+function bindKnowledgePageEvents() {
+  // Delegate to the page module, forwarding the debounced reload so the
+  // filter input uses the same cadence as the rest of the app.
+  knowledgePage.bindKnowledgePageEvents(knowledgeFilterDebounced);
+}
+
+// ── M8: Prescription satisfaction feedback (user side) ──
+// Submitted via POST /feedback with category="prescription"; admins review
+// these in the admin panel's feedback-management section.
+function updatePrescriptionFeedbackCard() {
+  if (!els.prescriptionFeedbackCard) return;
+  // Only show when a real prescription exists and the backend is live
+  // (Demo mode has no persistence target for feedback).
+  const show = Boolean(state.prescription) && !window.APP_CONFIG.DEMO_MODE;
+  els.prescriptionFeedbackCard.hidden = !show;
+}
+
+function updateFeedbackStarRating(rating) {
+  state.feedbackRating = rating;
+  const input = document.getElementById("feedback-rating-value");
+  if (input) input.value = rating ? String(rating) : "";
+  document.querySelectorAll("#feedback-star-rating .star-btn").forEach((btn) => {
+    const value = Number(btn.dataset.rating);
+    btn.classList.toggle("active", value <= rating);
+  });
+}
+
+async function submitPrescriptionFeedback(event) {
+  event.preventDefault();
+  if (!requireLogin()) return;
+  const content = document.getElementById("feedback-content")?.value?.trim() || "";
+  const rating = state.feedbackRating || null;
+  if (!rating && !content) {
+    showToast("请选择满意度评分或填写反馈内容");
+    return;
+  }
+  try {
+    await apiSend("POST", "/feedback", {
+      category: "prescription",
+      rating,
+      content,
+      source: "prescription_page",
+    });
+    showToast("感谢您的反馈！");
+    els.prescriptionFeedbackForm?.reset();
+    updateFeedbackStarRating(0);
+  } catch (error) {
+    showErrorToast(error.message || "反馈提交失败");
+  }
+}
+
+function bindPrescriptionFeedbackEvents() {
+  document.querySelectorAll("#feedback-star-rating .star-btn").forEach((btn) => {
+    btn.addEventListener("click", () => updateFeedbackStarRating(Number(btn.dataset.rating)));
+  });
+  els.prescriptionFeedbackForm?.addEventListener("submit", submitPrescriptionFeedback);
+}
+
+function initProfilePainRegions() {
+  if (!els.profilePainRegions) return;
+  window.PAIN_REGIONS.forEach((region) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chip";
+    button.textContent = region;
+    button.addEventListener("click", () => {
+      if (state.profileFormRegions.has(region)) {
+        state.profileFormRegions.delete(region);
+        button.classList.remove("selected");
+      } else {
+        state.profileFormRegions.add(region);
+        button.classList.add("selected");
+      }
+    });
+    els.profilePainRegions.appendChild(button);
+  });
+}
+
+function bindProfilesPageEvents() {
+  if (els.profilesList?.dataset.bound === "true") return;
+  if (els.profilesList) els.profilesList.dataset.bound = "true";
+
+  els.profilesList?.addEventListener("click", async (event) => {
+    const useBtn = event.target.closest(".profile-use-btn");
+    if (useBtn) {
+      const profile = state.patientProfiles.find((item) => item.id === Number(useBtn.dataset.profileId));
+      if (profile) {
+        state.selectedPatientProfileId = profile.id;
+        renderPatientProfileSelect();
+        applyPatientProfileToIntake(profile);
+        goToStep("intake");
+        showToast(`已关联档案：${profile.name}`);
+      }
+      return;
+    }
+    const editBtn = event.target.closest(".profile-edit-btn");
+    if (editBtn) {
+      const profile = state.patientProfiles.find((item) => item.id === Number(editBtn.dataset.profileId));
+      if (profile) fillProfileForm(profile);
+      return;
+    }
+    const deleteBtn = event.target.closest(".profile-delete-btn");
+    if (deleteBtn) {
+      await deleteProfile(Number(deleteBtn.dataset.profileId));
+    }
+  });
 }
 
 function todayIsoDate() {
@@ -683,7 +1922,7 @@ function todayIsoDate() {
 }
 
 async function loadPatientProfiles() {
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE || !els.patientProfileSelect) return;
+  if (!apiEnabled() || !els.patientProfileSelect) return;
   try {
     const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/patient_profiles`, {
       headers: authHeaders(),
@@ -709,7 +1948,7 @@ function renderPatientProfileSelect() {
 }
 
 async function createPatientProfileFromIntake(formData) {
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) return null;
+  if (!apiEnabled()) return null;
   const response = await fetchWithTimeout(
     `${window.APP_CONFIG.API_BASE}/patient_profiles`,
     {
@@ -735,7 +1974,7 @@ async function createPatientProfileFromIntake(formData) {
 async function exportPrescription(format) {
   const prescriptionId = state.prescription?.id;
   if (!prescriptionId || window.APP_CONFIG.DEMO_MODE) {
-    showToast("请先登录并在 API 模式下生成可导出的处方");
+    showWarnToast("请先登录并在 API 模式下生成可导出的处方");
     return;
   }
   if (!requireLogin()) return;
@@ -754,12 +1993,12 @@ async function exportPrescription(format) {
     URL.revokeObjectURL(url);
     showToast(`处方已导出为 ${format.toUpperCase()}`);
   } catch {
-    showToast("处方导出失败，请确认已登录且后端可用");
+    showErrorToast("处方导出失败，请确认已登录且后端可用");
   }
 }
 
 async function submitTrainingCheckin(action, options = {}) {
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) return null;
+  if (!apiEnabled()) return null;
   const payload = {
     prescription_id: state.prescription?.id ?? null,
     patient_profile_id: state.prescription?.patient_profile_id ?? state.selectedPatientProfileId ?? null,
@@ -790,7 +2029,7 @@ async function submitTrainingCheckin(action, options = {}) {
 
 async function loadTrainingStats() {
   if (!els.trainingStatsPanel) return;
-  if (!isSessionReady() || window.APP_CONFIG.DEMO_MODE) {
+  if (!apiEnabled()) {
     els.trainingStatsPanel.hidden = true;
     return;
   }
@@ -826,7 +2065,10 @@ async function loadTrainingStats() {
       }
     `;
   } catch {
-    els.trainingStatsPanel.innerHTML = `<p class="hint">训练统计加载失败，请确认后端已启动。</p>`;
+    renderLoadError(els.trainingStatsPanel, {
+      message: "训练统计加载失败，请确认后端已启动后重试。",
+      onRetry: loadTrainingStats,
+    });
   }
 }
 
@@ -836,14 +2078,6 @@ function getApiDocsUrl() {
     return `${apiBase.slice(0, -4)}/docs`;
   }
   return `${window.location.protocol}//${window.location.hostname}:8000/docs`;
-}
-
-function escapeAdminText(value) {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
 }
 
 function parseAdminList(value) {
@@ -1049,7 +2283,138 @@ function renderAdminActionListInner(actions) {
   return `<div class="admin-action-cards">${actions.map((action) => renderAdminActionCard(action)).join("")}</div>`;
 }
 
-function renderAdminPanel({ actions, meta, deploy, testReport }) {
+// ── M8: Admin panel sections (dashboard / users / feedback) ──
+// These render the three new admin blocks backed by /admin/dashboard,
+// /admin/users and /admin/feedback. They are composed into renderAdminPanel.
+function renderAdminDashboardSection(dashboard) {
+  if (!dashboard) {
+    return `<section class="admin-section" id="admin-dashboard-section">
+      <h3>数据统计</h3>
+      <p class="hint">暂无统计数据。</p>
+    </section>`;
+  }
+  const totals = dashboard.totals || {};
+  const recent = dashboard.recent_activity || {};
+  const feedback = dashboard.feedback_summary || {};
+  const risk = dashboard.risk_summary || {};
+  return `<section class="admin-section" id="admin-dashboard-section">
+    <h3>数据统计</h3>
+    <div class="admin-meta-grid">
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.users ?? 0}</span><span class="admin-meta-label">注册用户</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.prescriptions ?? 0}</span><span class="admin-meta-label">处方总数</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.training_checkins ?? 0}</span><span class="admin-meta-label">训练打卡</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.user_feedback ?? 0}</span><span class="admin-meta-label">用户反馈</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${totals.actions ?? 0}</span><span class="admin-meta-label">动作库条目</span></div>
+      <div class="admin-meta-card"><span class="admin-meta-value">${feedback.open_count ?? 0}</span><span class="admin-meta-label">待处理反馈</span></div>
+    </div>
+    <div class="admin-meta-grid">
+      <div class="admin-meta-card admin-meta-wide">
+        <span class="admin-meta-label">近 7 日活跃</span>
+        <span class="hint">新用户 ${recent.new_users_7d ?? 0} · 新处方 ${recent.new_prescriptions_7d ?? 0} · 打卡 ${recent.training_checkins_7d ?? 0} · 反馈 ${recent.feedback_7d ?? 0}</span>
+      </div>
+      <div class="admin-meta-card admin-meta-wide">
+        <span class="admin-meta-label">影像风险预警</span>
+        <span class="hint">中高风险报告 ${risk.red_flag_reports ?? 0} 条</span>
+      </div>
+    </div>
+  </section>`;
+}
+
+function renderAdminUsersSection(users) {
+  const rows = (users || [])
+    .map(
+      (user) => `<tr>
+        <td>${escapeAdminText(user.nickname)}<br><span class="hint">${escapeAdminText(user.account)}</span></td>
+        <td>${escapeAdminText(user.role)}</td>
+        <td>${user.prescription_count ?? 0}</td>
+        <td>${user.training_checkin_count ?? 0}</td>
+        <td>${user.feedback_count ?? 0}</td>
+        <td>${formatShortDate(user.created_at)}</td>
+      </tr>`
+    )
+    .join("");
+  return `<section class="admin-section" id="admin-users-section">
+    <div class="admin-section-head">
+      <h3>用户管理</h3>
+      <span class="hint">共 ${(users || []).length} 条</span>
+    </div>
+    <div class="admin-toolbar">
+      <label class="admin-filter">搜索用户
+        <input id="admin-user-filter-q" type="search" placeholder="账号、昵称…" value="${escapeAdminText(state.adminUserFilter.q)}" />
+      </label>
+      <button class="btn btn-secondary btn-small" id="admin-refresh-users" type="button">刷新</button>
+    </div>
+    <div class="admin-table-wrap">
+      <table class="admin-table">
+        <thead><tr><th>用户</th><th>角色</th><th>处方</th><th>打卡</th><th>反馈</th><th>注册时间</th></tr></thead>
+        <tbody>${rows || "<tr><td colspan=\"6\" class=\"hint\">暂无用户数据</td></tr>"}</tbody>
+      </table>
+    </div>
+  </section>`;
+}
+
+function renderAdminFeedbackCard(item) {
+  const statusOptions = ["open", "processing", "resolved", "closed"]
+    .map(
+      (s) =>
+        `<option value="${s}"${item.status === s ? " selected" : ""}>${s === "open" ? "待处理" : s === "processing" ? "处理中" : s === "resolved" ? "已解决" : "已关闭"}</option>`
+    )
+    .join("");
+  const stars = item.rating ? "★".repeat(item.rating) + "☆".repeat(5 - item.rating) : "未评分";
+  return `<article class="admin-feedback-card" data-feedback-id="${item.id}">
+    <div class="admin-feedback-head">
+      <div>
+        <strong>${escapeAdminText(item.user_nickname || item.user_account || "匿名用户")}</strong>
+        <span class="admin-feedback-meta">${escapeAdminText(item.category)} · ${stars} · ${formatShortDate(item.created_at)}</span>
+      </div>
+      <span class="admin-feedback-status status-${escapeAdminText(item.status)}">${escapeAdminText(item.status)}</span>
+    </div>
+    <p>${escapeAdminText(item.content)}</p>
+    <form class="admin-feedback-update-form" data-feedback-id="${item.id}">
+      <label class="admin-field">处理状态
+        <select name="status">${statusOptions}</select>
+      </label>
+      <label class="admin-field admin-field-wide">管理员备注
+        <input name="admin_note" type="text" value="${escapeAdminText(item.admin_note || "")}" placeholder="可选" />
+      </label>
+      <button class="btn btn-primary btn-small" type="submit">更新</button>
+    </form>
+  </article>`;
+}
+
+function renderAdminFeedbackSection(feedbackItems) {
+  const statusFilter = state.adminFeedbackFilters.status;
+  const categoryFilter = state.adminFeedbackFilters.category;
+  const cards = (feedbackItems || []).map(renderAdminFeedbackCard).join("");
+  return `<section class="admin-section" id="admin-feedback-section">
+    <div class="admin-section-head">
+      <h3>反馈管理</h3>
+      <span class="hint">共 ${(feedbackItems || []).length} 条</span>
+    </div>
+    <div class="admin-toolbar">
+      <label class="admin-filter">状态
+        <select id="admin-feedback-status">
+          <option value="">全部</option>
+          <option value="open"${statusFilter === "open" ? " selected" : ""}>待处理</option>
+          <option value="processing"${statusFilter === "processing" ? " selected" : ""}>处理中</option>
+          <option value="resolved"${statusFilter === "resolved" ? " selected" : ""}>已解决</option>
+          <option value="closed"${statusFilter === "closed" ? " selected" : ""}>已关闭</option>
+        </select>
+      </label>
+      <label class="admin-filter">类别
+        <select id="admin-feedback-category">
+          <option value="">全部</option>
+          <option value="prescription"${categoryFilter === "prescription" ? " selected" : ""}>处方反馈</option>
+          <option value="general"${categoryFilter === "general" ? " selected" : ""}>一般反馈</option>
+        </select>
+      </label>
+      <button class="btn btn-secondary btn-small" id="admin-refresh-feedback" type="button">刷新</button>
+    </div>
+    <div class="admin-feedback-list">${cards || "<p class=\"hint\">暂无反馈记录</p>"}</div>
+  </section>`;
+}
+
+function renderAdminPanel({ actions, meta, deploy, testReport, dashboard, users, feedbackItems }) {
   const regionOptions = (meta?.body_regions || [])
     .map(
       (region) =>
@@ -1058,6 +2423,10 @@ function renderAdminPanel({ actions, meta, deploy, testReport }) {
     .join("");
 
   return `
+    ${renderAdminDashboardSection(dashboard)}
+    ${renderAdminUsersSection(users)}
+    ${renderAdminFeedbackSection(feedbackItems)}
+
     <div class="admin-toolbar">
       <label class="admin-filter">关键词
         <input id="admin-filter-q" type="search" placeholder="名称、ID、说明…" value="${escapeAdminText(state.adminFilters.q)}" />
@@ -1167,32 +2536,80 @@ async function fetchAdminTestReport() {
   }
 }
 
+async function fetchAdminUsers() {
+  const params = new URLSearchParams();
+  if (state.adminUserFilter.q?.trim()) params.set("q", state.adminUserFilter.q.trim());
+  params.set("limit", "50");
+  const query = params.toString();
+  return apiGet(`/admin/users${query ? `?${query}` : ""}`);
+}
+
+async function fetchAdminFeedback() {
+  const params = new URLSearchParams();
+  if (state.adminFeedbackFilters.status) params.set("status", state.adminFeedbackFilters.status);
+  if (state.adminFeedbackFilters.category) params.set("category", state.adminFeedbackFilters.category);
+  params.set("limit", "50");
+  const query = params.toString();
+  return apiGet(`/admin/feedback${query ? `?${query}` : ""}`);
+}
+
+async function fetchAdminDashboard() {
+  return apiGet(`/admin/dashboard`);
+}
+
+async function updateAdminFeedback(feedbackId, payload) {
+  try {
+    return await apiSend("PUT", `/admin/feedback/${feedbackId}`, payload);
+  } catch (error) {
+    throw new Error(error.message || "更新失败");
+  }
+}
+
 async function loadAdminActions(options = {}) {
-  if (!els.adminActionsPanel || state.currentUser?.role !== "admin") return;
+  if (!els.adminActionsPanel) return;
   const { silent = false } = options;
   const scrollY = window.scrollY;
+
+  if (window.APP_CONFIG.DEMO_MODE) {
+    if (!silent) {
+      renderDemoNotice(els.adminActionsPanel, { featureName: "管理后台" });
+    }
+    return;
+  }
+  if (state.currentUser?.role !== "admin") {
+    if (!silent) {
+      els.adminActionsPanel.innerHTML = "<p class=\"hint\">需要管理员账号才能访问管理后台。</p>";
+    }
+    return;
+  }
 
   if (!silent) {
     els.adminActionsPanel.innerHTML = `<p class="hint">正在加载管理后台…</p>`;
   }
 
   try {
-    const [actionsRes, metaRes, deployRes, testReport] = await Promise.all([
+    const [actionsRes, metaRes, deployRes, testReport, dashboard, users, feedbackItems] = await Promise.all([
       fetchWithTimeout(buildAdminActionsUrl(), { headers: authHeaders() }),
       fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions/meta`, { headers: authHeaders() }),
       fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/deployment/info`),
       fetchAdminTestReport(),
+      fetchAdminDashboard().catch(() => null),
+      fetchAdminUsers().catch(() => []),
+      fetchAdminFeedback().catch(() => []),
     ]);
     if (!actionsRes.ok) throw new Error("admin actions unavailable");
     const actions = await actionsRes.json();
     const meta = metaRes.ok ? await metaRes.json() : null;
     const deploy = deployRes.ok ? await deployRes.json() : null;
-    renderAdminPanelToDom({ actions, meta, deploy, testReport });
+    renderAdminPanelToDom({ actions, meta, deploy, testReport, dashboard, users, feedbackItems });
     if (silent) {
       window.scrollTo(0, scrollY);
     }
   } catch {
-    els.adminActionsPanel.innerHTML = `<p class="hint">管理员面板加载失败，请确认账号具备 admin 权限且后端已启动。</p>`;
+    renderLoadError(els.adminActionsPanel, {
+      message: "管理员面板加载失败，请确认账号具备 admin 权限且后端已启动。",
+      onRetry: () => loadAdminActions(),
+    });
     state.adminPanelData = null;
   }
 }
@@ -1274,6 +2691,20 @@ function bindAdminPanelEvents() {
       return;
     }
 
+    const refreshUsersButton = event.target.closest("#admin-refresh-users");
+    if (refreshUsersButton) {
+      await loadAdminActions({ silent: true });
+      showToast("用户列表已刷新");
+      return;
+    }
+
+    const refreshFeedbackButton = event.target.closest("#admin-refresh-feedback");
+    if (refreshFeedbackButton) {
+      await loadAdminActions({ silent: true });
+      showToast("反馈列表已刷新");
+      return;
+    }
+
     const editButton = event.target.closest(".admin-edit-action");
     if (editButton) {
       toggleAdminActionEdit(editButton.dataset.actionId);
@@ -1292,7 +2723,7 @@ function bindAdminPanelEvents() {
       try {
         await deleteAdminAction(deleteButton.dataset.actionId);
       } catch (error) {
-        showToast(error.message || "删除失败");
+        showErrorToast(error.message || "删除失败");
       }
       return;
     }
@@ -1304,16 +2735,26 @@ function bindAdminPanelEvents() {
       state.adminFilters.bodyRegion = event.target.value;
       await loadAdminActions({ silent: true });
     }
+    if (event.target.id === "admin-feedback-status") {
+      state.adminFeedbackFilters.status = event.target.value;
+      await loadAdminActions({ silent: true });
+    }
+    if (event.target.id === "admin-feedback-category") {
+      state.adminFeedbackFilters.category = event.target.value;
+      await loadAdminActions({ silent: true });
+    }
   });
 
   els.adminActionsPanel.addEventListener("input", (event) => {
     if (state.currentUser?.role !== "admin") return;
+    if (event.target.id === "admin-user-filter-q") {
+      state.adminUserFilter.q = event.target.value;
+      adminUserFilterDebounced();
+      return;
+    }
     if (event.target.id !== "admin-filter-q") return;
     state.adminFilters.q = event.target.value;
-    clearTimeout(window.adminFilterTimer);
-    window.adminFilterTimer = window.setTimeout(() => {
-      loadAdminActions({ silent: true });
-    }, 300);
+    adminFilterDebounced();
   });
 
   els.adminActionsPanel.addEventListener("submit", async (event) => {
@@ -1324,7 +2765,7 @@ function bindAdminPanelEvents() {
       try {
         await submitAdminCreate(createForm);
       } catch (error) {
-        showToast(error.message || "新增动作失败");
+        showErrorToast(error.message || "新增动作失败");
       }
       return;
     }
@@ -1335,7 +2776,25 @@ function bindAdminPanelEvents() {
       try {
         await submitAdminEdit(editForm.dataset.actionId, editForm);
       } catch (error) {
-        showToast(error.message || "保存失败");
+        showErrorToast(error.message || "保存失败");
+      }
+      return;
+    }
+
+    const feedbackForm = event.target.closest(".admin-feedback-update-form");
+    if (feedbackForm) {
+      event.preventDefault();
+      const formData = new FormData(feedbackForm);
+      const payload = {
+        status: formData.get("status")?.toString() || undefined,
+        admin_note: formData.get("admin_note")?.toString().trim() || undefined,
+      };
+      try {
+        await updateAdminFeedback(Number(feedbackForm.dataset.feedbackId), payload);
+        showToast("反馈已更新");
+        await loadAdminActions({ silent: true });
+      } catch (error) {
+        showErrorToast(error.message || "更新失败");
       }
     }
   });
@@ -1368,23 +2827,23 @@ function updateUserIdentity() {
 
 function renderHistoryCard(prescription) {
   const header = [
-    prescription.patient_name ? `患者：${prescription.patient_name}` : "",
-    prescription.patient_age ? `年龄：${prescription.patient_age}` : "",
+    prescription.patient_name ? `患者：${escapeHtml(prescription.patient_name)}` : "",
+    prescription.patient_age ? `年龄：${escapeHtml(prescription.patient_age)}` : "",
   ]
     .filter(Boolean)
     .join(" | ");
 
   return `
     <article class="history-card">
-      <h4>处方 #${prescription.id || "N/A"}</h4>
+      <h4>处方 #${escapeHtml(prescription.id || "N/A")}</h4>
       ${header ? `<div class="meta">${header}</div>` : ""}
       <div class="summary-block">${formatSummary(prescription.summary)}</div>
       <ul>
         ${prescription.actions
           .map(
             (action) =>
-              `<li><strong>${action.name}</strong>：${action.sets}组 × ${action.reps}次${
-                action.note ? `（${action.note}）` : ""
+              `<li><strong>${escapeHtml(action.name)}</strong>：${escapeHtml(action.sets)}组 × ${escapeHtml(action.reps)}次${
+                action.note ? `（${escapeHtml(action.note)}）` : ""
               }</li>`
           )
           .join("")}
@@ -1392,8 +2851,8 @@ function renderHistoryCard(prescription) {
       ${
         prescription.id && !window.APP_CONFIG.DEMO_MODE
           ? `<div class="history-card-actions">
-              <button class="btn btn-secondary btn-small history-export-md" type="button" data-id="${prescription.id}">导出 MD</button>
-              <button class="btn btn-secondary btn-small history-export-json" type="button" data-id="${prescription.id}">导出 JSON</button>
+              <button class="btn btn-secondary btn-small history-export-md" type="button" data-id="${escapeHtml(prescription.id)}">导出 MD</button>
+              <button class="btn btn-secondary btn-small history-export-json" type="button" data-id="${escapeHtml(prescription.id)}">导出 JSON</button>
             </div>`
           : ""
       }
@@ -1451,7 +2910,7 @@ async function loadPrescriptionHistory() {
       error?.name === "AbortError"
         ? "历史处方请求超时，请确认后端已启动。"
         : "加载失败，请确认后端已启动且已登录。";
-    els.prescriptionHistory.textContent = hint;
+    renderLoadError(els.prescriptionHistory, { message: hint, onRetry: loadPrescriptionHistory });
   }
 }
 
@@ -1488,9 +2947,17 @@ async function requestPrescription(formData) {
   }
 
   if (!response.ok) {
-    const detail = await parseApiError(response);
-    const error = new Error(detail || `HTTP ${response.status}`);
+    const detail = await parseApiErrorDetail(response);
+    const message =
+      typeof detail === "object" && detail !== null
+        ? detail.message || JSON.stringify(detail)
+        : detail || `HTTP ${response.status}`;
+    const error = new Error(message);
     error.status = response.status;
+    if (typeof detail === "object" && detail?.code === "red_flag_detected") {
+      error.code = detail.code;
+      error.redFlags = detail.red_flags || [];
+    }
     throw error;
   }
 
@@ -1530,7 +2997,7 @@ function renderPrescription(prescription) {
   if (prescription.patient_name) metaParts.push(`患者：${prescription.patient_name}`);
   if (prescription.patient_age) metaParts.push(`年龄：${prescription.patient_age}`);
   if (prescription.source === "mock") metaParts.push("来源：本地 Mock");
-  if (prescription.source === "api") metaParts.push("来源：豆包后端 API");
+  if (prescription.source === "api") metaParts.push("来源：DeepSeek 后端 API");
   els.prescriptionMeta.textContent = metaParts.join(" · ");
   els.prescriptionSummary.innerHTML = formatSummary(prescription.summary);
   els.actionList.innerHTML = "";
@@ -1543,61 +3010,63 @@ function renderPrescription(prescription) {
       <div class="action-image-wrap">
         <img
           src="${window.APP_CONFIG.assetUrl(action.image)}"
-          alt="${action.name}示意图"
+          alt="${escapeHtml(action.name)}示意图"
           loading="lazy"
           onerror="handleActionImageError(this)"
         />
         <span class="action-image-placeholder">示意图待上传</span>
       </div>
       <div class="action-card-body">
-        <h3>${action.name}</h3>
+        <h3>${escapeHtml(action.name)}</h3>
         <div class="action-meta">
-          <span class="tag">${action.sets} 组</span>
-          <span class="tag">${action.reps} 次/组</span>
-          ${action.frequency ? `<span class="tag tag-frequency">${action.frequency}</span>` : ""}
+          <span class="tag">${escapeHtml(action.sets)} 组</span>
+          <span class="tag">${escapeHtml(action.reps)} 次/组</span>
+          ${action.frequency ? `<span class="tag tag-frequency">${escapeHtml(action.frequency)}</span>` : ""}
+          ${action.difficulty_level ? `<span class="tag tag-difficulty${action.difficulty_level === "中级" ? " mid" : action.difficulty_level === "高级" ? " advanced" : ""}">${escapeHtml(action.difficulty_level)}</span>` : ""}
           <span class="tag ${poseSupported ? "tag-supported" : "tag-pending"}">
             ${poseSupported ? "支持实时纠正" : "暂不支持实时纠正"}
           </span>
         </div>
-        <p>${action.description || "按医嘱缓慢完成动作，注意呼吸节奏。"}</p>
+        <p>${escapeHtml(action.description || "按医嘱缓慢完成动作，注意呼吸节奏。")}</p>
         ${renderActionVideoMarkup(action)}
         ${
           action.note
-            ? `<p><strong>注意：</strong>${action.note}</p>`
+            ? `<p><strong>注意：</strong>${escapeHtml(action.note)}</p>`
             : ""
         }
         ${
           action.contraindications
-            ? `<p class="hint"><strong>禁忌：</strong>${action.contraindications}</p>`
+            ? `<p class="hint"><strong>禁忌：</strong>${escapeHtml(action.contraindications)}</p>`
             : ""
         }
         ${
           action.progression
-            ? `<p class="hint"><strong>进阶：</strong>${action.progression}</p>`
+            ? `<p class="hint"><strong>进阶：</strong>${escapeHtml(action.progression)}</p>`
             : ""
         }
         ${
           action.regression
-            ? `<p class="hint"><strong>降阶：</strong>${action.regression}</p>`
+            ? `<p class="hint"><strong>降阶：</strong>${escapeHtml(action.regression)}</p>`
             : ""
         }
-        <button class="btn btn-primary view-demo" type="button" data-action-id="${action.id || ""}">
+        <button class="btn btn-primary view-demo" type="button" data-action-id="${escapeHtml(action.id || "")}">
           查看演示${poseSupported ? " / 跟练" : ""}
         </button>
-        ${poseSupported ? "" : `<p class="hint support-hint">${window.APP_CONFIG.getUnsupportedPoseHint()}</p>`}
+        ${poseSupported ? "" : `<p class="hint support-hint">${escapeHtml(window.APP_CONFIG.getUnsupportedPoseHint())}</p>`}
       </div>
     `;
     els.actionList.appendChild(card);
   });
 
   updatePrescriptionExportBar();
+  updatePrescriptionFeedbackCard();
 
   els.actionList.querySelectorAll(".view-demo").forEach((button) => {
     button.addEventListener("click", () => {
       const actionId = button.dataset.actionId;
       const action = prescription.actions.find((item) => item.id === actionId);
       if (!action) {
-        showToast("动作信息缺失，请稍后重试");
+        showErrorToast("动作信息缺失，请稍后重试");
         return;
       }
       showDemo(action);
@@ -1606,7 +3075,7 @@ function renderPrescription(prescription) {
 }
 
 function updatePoseFeedback(result) {
-  const { feedback, score, status } = result;
+  const { feedback, score, status, voice_cue: voiceCue } = result;
   if (typeof score === "number") {
     state.trainingLastScore = score;
   }
@@ -1640,6 +3109,8 @@ function updatePoseFeedback(result) {
   if (typeof score === "number" && score < 60 && navigator.vibrate) {
     navigator.vibrate(80);
   }
+  countRep(status);
+  playVoiceCue(feedback, status, score, voiceCue);
 }
 
 async function correctPose(payload) {
@@ -1664,6 +3135,7 @@ async function correctPose(payload) {
     feedback: data.feedback || ["暂无反馈"],
     score: data.score ?? 0,
     status: data.status || "warning",
+    voice_cue: data.voice_cue || null,
   };
 }
 
@@ -1674,6 +3146,36 @@ function averageVisibility(visibility) {
 
 function getPoseActionId(action) {
   return action?.backendId || window.APP_CONFIG.getBackendActionId(action?.id) || action?.id;
+}
+
+function getPoseMissingVisibilityFeedback(actionId, visibility) {
+  const backendActionId = window.APP_CONFIG.getBackendActionId(actionId);
+  const required = window.APP_CONFIG.POSE_REQUIRED_KEYPOINTS?.[backendActionId] || [];
+  if (!required.length || !Array.isArray(visibility)) return null;
+
+  const missing = required
+    .filter((index) => (visibility[index] ?? 0) < window.APP_CONFIG.POSE_VISIBILITY_MIN)
+    .map((index) => window.APP_CONFIG.POSE_KEYPOINT_NAMES[index] || `关键点${index}`);
+  if (!missing.length) return null;
+
+  if (missing.length === required.length) {
+    return {
+      feedback: [
+        "未识别到该动作的关键关节，请确保目标部位完整入镜并重新采集姿态。",
+      ],
+      score: 0,
+      status: "error",
+    };
+  }
+
+  const names = missing.length === 1 ? missing[0] : `${missing.slice(0, -1).join("、")}和${missing[missing.length - 1]}`;
+  return {
+    feedback: [
+      `未识别到${names}，请调整摄像头角度或使这些部位更清晰可见。`,
+    ],
+    score: 35,
+    status: "warning",
+  };
 }
 
 function queuePosePayload(frame) {
@@ -1709,6 +3211,11 @@ function queuePosePayload(frame) {
     visibility: frame.visibility,
     timestamp: now,
   };
+
+  const missingFeedback = getPoseMissingVisibilityFeedback(payload.action_id, frame.visibility);
+  if (missingFeedback) {
+    updatePoseFeedback(missingFeedback);
+  }
 
   if (now - state.lastPoseSentAt < window.APP_CONFIG.POSE_SEND_INTERVAL_MS) {
     state.pendingPosePayload = payload;
@@ -1772,53 +3279,46 @@ function preloadPoseTracker() {
 }
 
 function showDemo(action) {
-  state.currentAction = action;
+  return showDemoAsync(action);
+}
+
+async function showDemoAsync(action) {
+  const detail = await fetchActionDetail(action);
+  state.currentAction = detail;
 
   const nameEl = document.getElementById("demo-action-name");
   const imgEl = document.getElementById("demo-action-image");
   const metaEl = document.getElementById("demo-meta");
   const descEl = document.getElementById("demo-action-desc");
-  const contraSec = document.getElementById("demo-contraindications-section");
   const contraEl = document.getElementById("demo-contraindications");
-  const progSec = document.getElementById("demo-progression-section");
   const progEl = document.getElementById("demo-progression");
   const videoWrap = document.getElementById("demo-video-wrap");
   const videoLink = document.getElementById("demo-video-link");
   const videoHintEl = document.getElementById("demo-video-hint");
   const startBtn = document.getElementById("demo-start-training");
 
-  if (nameEl) nameEl.textContent = action.name;
+  if (nameEl) nameEl.textContent = detail.name;
 
   if (imgEl) {
     imgEl.classList.remove("is-missing");
-    imgEl.src = window.APP_CONFIG.assetUrl(action.image);
-    imgEl.alt = `${action.name}示意图`;
+    imgEl.src = window.APP_CONFIG.assetUrl(detail.image);
+    imgEl.alt = `${detail.name}示意图`;
   }
 
   if (metaEl) {
-    const parts = [];
-    if (action.sets) parts.push(`${action.sets} 组`);
-    if (action.reps) parts.push(`${action.reps} 次/组`);
-    if (action.frequency) parts.push(action.frequency);
-    metaEl.innerHTML = parts.map((p) => `<span class="tag">${p}</span>`).join("");
+    metaEl.innerHTML = renderActionMetaTags(detail);
   }
 
-  if (descEl) descEl.textContent = action.description || "按医嘱缓慢完成动作，注意呼吸节奏。";
+  if (descEl) descEl.textContent = detail.description || "按医嘱缓慢完成动作，注意呼吸节奏。";
+  renderActionDetailSections(detail);
 
-  if (contraSec && contraEl) {
-    contraSec.hidden = !action.contraindications;
-    contraEl.textContent = action.contraindications || "";
-  }
-
-  if (progSec && progEl) {
-    progSec.hidden = !action.progression;
-    progEl.textContent = action.progression || "";
-  }
+  if (contraEl) contraEl.textContent = detail.contraindications || "";
+  if (progEl) progEl.textContent = detail.progression || "";
 
   if (videoWrap && videoLink && videoHintEl) {
-    if (isValidVideoUrl(action.videoUrl)) {
+    if (isValidVideoUrl(detail.videoUrl)) {
       videoLink.href = "#";
-      videoLink.dataset.videoUrl = action.videoUrl;
+      videoLink.dataset.videoUrl = detail.videoUrl;
       videoLink.hidden = false;
       videoHintEl.textContent = "";
       videoHintEl.hidden = true;
@@ -1832,7 +3332,7 @@ function showDemo(action) {
     }
   }
 
-  const poseSupported = window.APP_CONFIG.isPoseSupported(action.id);
+  const poseSupported = window.APP_CONFIG.isPoseSupported(detail.id);
   if (startBtn) {
     startBtn.hidden = !poseSupported;
   }
@@ -1842,7 +3342,7 @@ function showDemo(action) {
 
 function startTraining(action) {
   if (!window.APP_CONFIG.isPoseSupported(action.id)) {
-    showToast("该动作暂不支持实时纠正，请选择支持的动作进行跟练。");
+    showWarnToast("该动作暂不支持实时纠正，请选择支持的动作进行跟练。");
     return;
   }
   stopPrescriptionLoading();
@@ -1870,11 +3370,19 @@ function startTraining(action) {
   els.videoShell.classList.remove("status-ok", "status-warning", "status-error");
   goToStep("training");
   preloadPoseTracker();
+  startTrainingCounter();
+  resetVoiceCueState();
+  syncVoiceToggleUi();
+  setVoiceCueText(
+    state.voiceEnabled
+      ? "等待动作检测…"
+      : "纠错提示将显示于此；点击「开启语音播报」可朗读"
+  );
 }
 
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    showToast("当前浏览器不支持摄像头");
+    showErrorToast("当前浏览器不支持摄像头");
     return;
   }
 
@@ -1898,10 +3406,18 @@ async function startCamera() {
     state.poseTracker.start();
     if (els.feedbackOverlay) els.feedbackOverlay.textContent = "等待检测…";
     els.statusText.textContent = "实时检测中";
+    if (!state.voiceEnabled && "speechSynthesis" in window) {
+      state.voiceEnabled = true;
+      syncVoiceToggleUi();
+      setVoiceCueText("语音播报已开启");
+      speakVoicePrompt("语音播报已开启");
+    } else {
+      setVoiceCueText(state.voiceEnabled ? "正在检测，请做动作…" : "纠错提示将显示于此");
+    }
     showToast("摄像头已启动，正在实时分析动作");
   } catch (error) {
     stopCamera();
-    showToast("无法访问摄像头或姿态模型加载失败，请检查浏览器权限与网络");
+    showErrorToast("无法访问摄像头或姿态模型加载失败，请检查浏览器权限与网络");
   } finally {
     setCameraLoading(false);
     if (els.startCameraButton && state.cameraStream) {
@@ -1925,6 +3441,7 @@ function stopCamera() {
 }
 
 function completeTraining() {
+  stopTrainingCounter();
   const action = state.currentAction;
   if (!action) return;
   state.currentAction = null;
@@ -1938,13 +3455,13 @@ function completeTraining() {
   const painAfter = els.checkinPainAfter?.value ? Number(els.checkinPainAfter.value) : null;
   const note = els.checkinNote?.value?.trim() || null;
 
-  const finish = (message = "训练已完成，可继续跟练其他动作或返回问诊") => {
+  const finish = (message = "训练已完成，可继续跟练其他动作或返回问诊", toastOptions = {}) => {
     if (completeButton) {
       completeButton.disabled = false;
       completeButton.textContent = "完成训练，返回处方";
     }
     goToStep("prescription");
-    showToast(message);
+    showToast(message, toastOptions);
   };
 
   if (window.APP_CONFIG.DEMO_MODE || !isSessionReady()) {
@@ -1957,7 +3474,10 @@ function completeTraining() {
       finish("训练打卡已保存");
     })
     .catch((error) => {
-      finish(typeof error.message === "string" ? error.message : "训练打卡保存失败");
+      finish(
+        typeof error.message === "string" ? error.message : "训练打卡保存失败",
+        { type: "error" }
+      );
     });
 }
 
@@ -1980,20 +3500,20 @@ function applyDevModeUi() {
 
 async function testDoubaoConnection() {
   if (window.APP_CONFIG.DEMO_MODE) {
-    showToast("请先关闭 Demo 模式再测试豆包连接");
+    showWarnToast("请先关闭 Demo 模式再测试 DeepSeek 连接");
     return;
   }
 
-  setLoading(true, "正在测试豆包 API 连接…");
+  setLoading(true, "正在测试 DeepSeek API 连接…");
   try {
     const response = await fetchWithTimeout(
-      `${window.APP_CONFIG.API_BASE}/test_doubao`,
+      `${window.APP_CONFIG.API_BASE}/test_deepseek`,
       { method: "POST" },
       window.APP_CONFIG.PRESCRIPTION_TIMEOUT_MS
     );
     const data = await response.json();
     if (data.status === "success") {
-      showToast("豆包连接成功，摘要已生成");
+      showToast("DeepSeek 连接成功，摘要已生成");
       const summaryContent =
         typeof data.summary === "string"
           ? data.summary
@@ -2001,11 +3521,11 @@ async function testDoubaoConnection() {
       showDoubaoResult(summaryContent);
     } else {
       showDoubaoResult(data);
-      showToast(`豆包连接失败：${data.detail || "未知错误"}`);
+      showErrorToast(`DeepSeek 连接失败：${data.detail || "未知错误"}`);
     }
   } catch (error) {
-    showDoubaoResult({ error: "豆包测试请求失败，请检查后端与环境变量" });
-    showToast("豆包测试请求失败，请检查后端与环境变量");
+    showDoubaoResult({ error: "DeepSeek 测试请求失败，请检查后端与环境变量" });
+    showErrorToast("DeepSeek 测试请求失败，请检查后端与环境变量");
   } finally {
     setLoading(false);
   }
@@ -2028,6 +3548,7 @@ function initPainRegions() {
       if (state.selectedPainRegions.size > 0) {
         els.painRegionsError.textContent = "";
       }
+      updateMobilityGuide();
     });
     els.painRegions.appendChild(button);
   });
@@ -2039,6 +3560,8 @@ function updateModeBadge() {
 }
 
 function bindEvents() {
+  els.toastClose?.addEventListener("click", hideToast);
+
   els.authLoginForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     submitAuth("login");
@@ -2057,6 +3580,7 @@ function bindEvents() {
 
   els.mobilityScore.addEventListener("input", (event) => {
     els.mobilityValue.textContent = event.target.value;
+    updateMobilityTierDisplay(Number(event.target.value));
   });
 
   els.intakeForm.addEventListener("submit", async (event) => {
@@ -2084,24 +3608,28 @@ function bindEvents() {
       goToStep("prescription");
       showToast(
         prescription.source === "api"
-          ? "处方已由后端豆包服务生成"
+          ? "处方已由后端 DeepSeek 服务生成"
           : "已使用本地 Mock 处方"
       );
     } catch (error) {
       stopPrescriptionLoading();
       const isTimeout = error?.name === "AbortError";
-      if (error?.status === 400) {
+      if (error?.code === "red_flag_detected") {
+        showRedFlagAlert(error.message, error.redFlags);
+        els.symptomsError.textContent = "主诉含红旗症状，请查看屏幕中央预警提示";
+        showWarnToast("检测到红旗症状，已暂停生成处方");
+      } else if (error?.status === 400) {
         if (error.message.includes("疼痛部位")) {
           els.painRegionsError.textContent = error.message;
         } else {
           els.symptomsError.textContent = error.message;
         }
-        showToast(error.message);
+        showErrorToast(error.message);
       } else {
-        showToast(
+        showErrorToast(
           isTimeout
-            ? "豆包生成超时，请稍后重试或检查后端配置"
-            : "处方服务失败，请检查后端与 DOUBAO_API_KEY"
+            ? "DeepSeek 生成超时，请稍后重试或检查后端配置"
+            : "处方服务失败，请检查后端与 DeepSeek_API_KEY"
         );
       }
     } finally {
@@ -2134,6 +3662,11 @@ function bindEvents() {
   els.patientProfileSelect?.addEventListener("change", (event) => {
     const value = event.target.value;
     state.selectedPatientProfileId = value ? Number(value) : null;
+    if (state.selectedPatientProfileId) {
+      const profile = state.patientProfiles.find((item) => item.id === state.selectedPatientProfileId);
+      applyPatientProfileToIntake(profile);
+    }
+    loadImagingReports();
   });
 
   document.getElementById("save-patient-profile")?.addEventListener("click", async () => {
@@ -2143,15 +3676,61 @@ function bindEvents() {
     try {
       const profile = await createPatientProfileFromIntake(formData);
       if (profile) showToast(`已保存患者档案：${profile.name}`);
-      else showToast("患者档案保存失败");
+      else showErrorToast("患者档案保存失败");
     } catch {
-      showToast("患者档案保存失败，请确认后端已启动");
+      showErrorToast("患者档案保存失败，请确认后端已启动");
     }
   });
 
+  els.goProgressButton?.addEventListener("click", () => goToStep("progress"));
+  els.knowledgeEntryButton?.addEventListener("click", () => goToStep("knowledge"));
+  document.getElementById("back-from-knowledge")?.addEventListener("click", () => goToStep("intake"));
+  document.getElementById("back-from-progress")?.addEventListener("click", () => goToStep("history"));
+  document.getElementById("export-report-md")?.addEventListener("click", exportProgressReport);
+  document.getElementById("toggle-voice")?.addEventListener("click", toggleVoice);
   els.adminEntryButton?.addEventListener("click", () => goToStep("admin"));
+  els.profilesEntryButton?.addEventListener("click", () => {
+    state.profileReturnStep = state.currentStep === "profiles" ? "intake" : state.currentStep;
+    goToStep("profiles");
+  });
+  els.libraryEntryButton?.addEventListener("click", () => goToStep("library"));
+  document.getElementById("open-profiles-from-intake")?.addEventListener("click", () => {
+    state.profileReturnStep = "intake";
+    goToStep("profiles");
+  });
+  document.getElementById("back-from-profiles")?.addEventListener("click", () => goToStep(state.profileReturnStep || "intake"));
+  document.getElementById("back-from-library")?.addEventListener("click", () => goToStep("intake"));
+  document.getElementById("profile-create-toggle")?.addEventListener("click", () => {
+    resetProfileForm();
+    if (els.profileFormCard) els.profileFormCard.hidden = false;
+  });
+  document.getElementById("profile-form-cancel")?.addEventListener("click", resetProfileForm);
+  document.getElementById("refresh-profiles")?.addEventListener("click", loadProfilesPage);
+  els.profileForm?.addEventListener("submit", saveProfileForm);
+  document.getElementById("upload-imaging-report")?.addEventListener("click", uploadImagingReport);
+  document.getElementById("red-flag-dismiss")?.addEventListener("click", hideRedFlagAlert);
+  els.redFlagOverlay?.addEventListener("click", (event) => {
+    if (event.target === els.redFlagOverlay) hideRedFlagAlert();
+  });
+  document.getElementById("refresh-library")?.addEventListener("click", loadActionLibrary);
+  document.getElementById("library-filter-q")?.addEventListener("input", (event) => {
+    state.libraryFilters.q = event.target.value;
+    libraryFilterDebounced();
+  });
+  document.getElementById("library-filter-region")?.addEventListener("change", (event) => {
+    state.libraryFilters.bodyRegion = event.target.value;
+    renderActionLibraryGrid();
+  });
+  document.getElementById("library-filter-difficulty")?.addEventListener("change", (event) => {
+    state.libraryFilters.difficulty = event.target.value;
+    renderActionLibraryGrid();
+  });
+  bindProfilesPageEvents();
+  bindImagingReportEvents();
   bindAdminPanelEvents();
   bindAdminQuickNavEvents();
+  bindKnowledgePageEvents();
+  bindPrescriptionFeedbackEvents();
   document.getElementById("back-from-admin")?.addEventListener("click", () => goToStep("intake"));
 
   document.getElementById("demo-start-training")?.addEventListener("click", () => {
@@ -2179,6 +3758,7 @@ function bindEvents() {
   });
   document.getElementById("stop-training").addEventListener("click", () => {
     stopCamera();
+    stopTrainingCounter();
     resetStartCameraButton();
     goToStep("prescription");
   });
@@ -2226,6 +3806,7 @@ function restoreSessionState() {
     renderPrescription(savedPrescription);
     renderPrescriptionRecap(savedFormData);
     updatePrescriptionExportBar();
+    updatePrescriptionFeedbackCard();
 
     const validSteps = ["prescription", "history", "intake"];
     const targetStep = validSteps.includes(savedStep) ? savedStep : "prescription";
@@ -2242,12 +3823,20 @@ function init() {
   }
 
   initPainRegions();
-bindEvents();
-applyDevModeUi();
-updateModeBadge();
-updateAuthStatus();
-updateAdminEntry();
-switchAuthTab("login");
+  initProfilePainRegions();
+  bindEvents();
+  applyDevModeUi();
+  updateModeBadge();
+  updateAuthStatus();
+  updateAdminEntry();
+  updateMobilityTierDisplay(Number(els.mobilityScore?.value || 5));
+  updateMobilitySummary(Number(els.mobilityScore?.value || 5));
+  switchAuthTab("login");
+
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.addEventListener("voiceschanged", primeSpeechSynthesis);
+    primeSpeechSynthesis();
+  }
 
   if (isSessionReady()) {
     loadPatientProfiles();

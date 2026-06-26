@@ -168,6 +168,11 @@ def get_imaging_report(db: Session, report_id: int, user_id: int):
     )
 
 
+def delete_imaging_report(db: Session, report: models.ImagingReportModel):
+    db.delete(report)
+    db.commit()
+
+
 def create_imaging_report(
     db: Session,
     request: schema.ImagingReportCreateRequest,

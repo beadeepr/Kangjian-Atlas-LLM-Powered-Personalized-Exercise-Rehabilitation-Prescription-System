@@ -75,7 +75,6 @@ class UserModel(Base):
     training_checkins = relationship('TrainingCheckinModel', back_populates='user', cascade='all, delete-orphan')
     imaging_reports = relationship('ImagingReportModel', back_populates='user', cascade='all, delete-orphan')
     feedback_items = relationship('UserFeedbackModel', back_populates='user', cascade='all, delete-orphan')
-    wearable_metrics = relationship('WearableMetricModel', back_populates='user', cascade='all, delete-orphan')
     doctor_links_as_patient = relationship('DoctorPatientLinkModel', foreign_keys='DoctorPatientLinkModel.user_id', back_populates='user', cascade='all, delete-orphan')
     doctor_links_as_doctor = relationship('DoctorPatientLinkModel', foreign_keys='DoctorPatientLinkModel.doctor_id', back_populates='doctor', cascade='all, delete-orphan')
 
@@ -104,7 +103,6 @@ class PatientProfileModel(Base):
     prescriptions = relationship('PrescriptionModel', back_populates='patient_profile')
     training_checkins = relationship('TrainingCheckinModel', back_populates='patient_profile')
     imaging_reports = relationship('ImagingReportModel', back_populates='patient_profile', cascade='all, delete-orphan')
-    wearable_metrics = relationship('WearableMetricModel', back_populates='patient_profile', cascade='all, delete-orphan')
     doctor_links = relationship('DoctorPatientLinkModel', back_populates='patient_profile', cascade='all, delete-orphan')
 
 
@@ -152,34 +150,6 @@ class TrainingCheckinModel(Base):
     user = relationship('UserModel', back_populates='training_checkins')
     patient_profile = relationship('PatientProfileModel', back_populates='training_checkins')
     prescription = relationship('PrescriptionModel', back_populates='training_checkins')
-
-
-class WearableMetricModel(Base):
-    __tablename__ = 'wearable_metrics'
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey('users.id'), nullable=False, index=True)
-    patient_profile_id = Column(Integer, ForeignKey('patient_profiles.id'), nullable=True, index=True)
-    training_checkin_id = Column(Integer, ForeignKey('training_checkins.id'), nullable=True, index=True)
-    device_type = Column(String(64), nullable=True)
-    heart_rate = Column(Integer, nullable=True)
-    resting_heart_rate = Column(Integer, nullable=True)
-    hrv_ms = Column(Integer, nullable=True)
-    spo2 = Column(Integer, nullable=True)
-    steps = Column(Integer, nullable=True)
-    calories = Column(Integer, nullable=True)
-    skin_temperature_c = Column(Float, nullable=True)
-    perceived_exertion = Column(Integer, nullable=True)
-    duration_minutes = Column(Integer, nullable=True)
-    fatigue_score = Column(Integer, nullable=False, default=0)
-    risk_level = Column(String(32), nullable=False, default='low', index=True)
-    signals = Column(JSON, nullable=True)
-    recommendation = Column(Text, nullable=True)
-    recorded_at = Column(DateTime, default=now, index=True)
-    created_at = Column(DateTime, default=now)
-
-    user = relationship('UserModel', back_populates='wearable_metrics')
-    patient_profile = relationship('PatientProfileModel', back_populates='wearable_metrics')
 
 
 class UserFeedbackModel(Base):
