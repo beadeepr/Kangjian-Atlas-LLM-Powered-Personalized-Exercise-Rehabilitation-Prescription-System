@@ -183,6 +183,35 @@ function mockCorrectPose(payload) {
   }
 
   const catalogId = window.APP_CONFIG.normalizeCatalogActionId(action_id);
+
+  const required = window.APP_CONFIG.POSE_REQUIRED_KEYPOINTS?.[catalogId] || [];
+  const missing = required
+    .filter((index) => (visibility?.[index] ?? 0) < window.APP_CONFIG.POSE_VISIBILITY_MIN)
+    .map((index) => window.APP_CONFIG.POSE_KEYPOINT_NAMES[index] || `关键点${index}`);
+  if (missing.length) {
+    if (missing.length === required.length) {
+      return {
+        feedback: [
+          "未识别到该动作的关键关节，请确保目标部位完整入镜并重新采集姿态。",
+        ],
+        score: 0,
+        status: "error",
+      };
+    }
+
+    const names =
+      missing.length === 1
+        ? missing[0]
+        : `${missing.slice(0, -1).join("、")}和${missing[missing.length - 1]}`;
+    return {
+      feedback: [
+        `未识别到${names}，请调整摄像头角度或使这些部位更清晰可见。`,
+      ],
+      score: 35,
+      status: "warning",
+    };
+  }
+
   if (!window.APP_CONFIG.isPoseSupported(catalogId)) {
     return {
       feedback: ["暂不支持该动作"],

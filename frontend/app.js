@@ -2987,6 +2987,36 @@ function getPoseActionId(action) {
   return action?.backendId || window.APP_CONFIG.getBackendActionId(action?.id) || action?.id;
 }
 
+function getPoseMissingVisibilityFeedback(actionId, visibility) {
+  const backendActionId = window.APP_CONFIG.getBackendActionId(actionId);
+  const required = window.APP_CONFIG.POSE_REQUIRED_KEYPOINTS?.[backendActionId] || [];
+  if (!required.length || !Array.isArray(visibility)) return null;
+
+  const missing = required
+    .filter((index) => (visibility[index] ?? 0) < window.APP_CONFIG.POSE_VISIBILITY_MIN)
+    .map((index) => window.APP_CONFIG.POSE_KEYPOINT_NAMES[index] || `关键点${index}`);
+  if (!missing.length) return null;
+
+  if (missing.length === required.length) {
+    return {
+      feedback: [
+        "未识别到该动作的关键关节，请确保目标部位完整入镜并重新采集姿态。",
+      ],
+      score: 0,
+      status: "error",
+    };
+  }
+
+  const names = missing.length === 1 ? missing[0] : `${missing.slice(0, -1).join("、")}和${missing[missing.length - 1]}`;
+  return {
+    feedback: [
+      `未识别到${names}，请调整摄像头角度或使这些部位更清晰可见。`,
+    ],
+    score: 35,
+    status: "warning",
+  };
+}
+
 function queuePosePayload(frame) {
   if (!state.currentAction?.id || !state.autoPoseEnabled) return;
 
@@ -3020,6 +3050,11 @@ function queuePosePayload(frame) {
     visibility: frame.visibility,
     timestamp: now,
   };
+
+  const missingFeedback = getPoseMissingVisibilityFeedback(payload.action_id, frame.visibility);
+  if (missingFeedback) {
+    updatePoseFeedback(missingFeedback);
+  }
 
   if (now - state.lastPoseSentAt < window.APP_CONFIG.POSE_SEND_INTERVAL_MS) {
     state.pendingPosePayload = payload;
