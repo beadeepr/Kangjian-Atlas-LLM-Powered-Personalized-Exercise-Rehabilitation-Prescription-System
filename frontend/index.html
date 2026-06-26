@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>康健图谱 - 个性化运动康复处方</title>
-    <link rel="stylesheet" href="style.css?v=20260625b" />
+    <link rel="stylesheet" href="style.css?v=20260626d" />
   </head>
   <body>
     <header class="app-header">
@@ -160,7 +160,7 @@
               placeholder="例如：颈部疼痛两周，转头受限，久坐后加重"
               required
             ></textarea>
-            <span class="field-hint">请用规范语言描述真实伤病症状（如疼痛、活动受限）；诗句或无关语句将被拦截。</span>
+            <span class="field-hint">请用规范语言描述真实伤病症状（如疼痛、活动受限）；无关语句将被拦截。</span>
             <span class="field-error" id="symptoms-error"></span>
           </div>
 
@@ -276,8 +276,8 @@
               </div>
               <input type="hidden" id="feedback-rating-value" name="rating" value="" />
             </div>
-            <label class="field field-full">反馈内容
-              <textarea id="feedback-content" name="content" rows="3" placeholder="请描述处方是否清晰、动作是否合适…" required></textarea>
+            <label class="field field-full">反馈内容（可选）
+              <textarea id="feedback-content" name="content" rows="3" placeholder="可选：描述处方是否清晰、动作是否合适…"></textarea>
             </label>
             <div class="form-actions">
               <button class="btn btn-primary btn-small" type="submit">提交反馈</button>
@@ -536,17 +536,9 @@
               <h3 class="training-side-title">语音纠错</h3>
               <div class="voice-status">
                 <span class="voice-indicator" id="voice-indicator"></span>
-                <span id="voice-cue-text">等待开始…</span>
+                <span id="voice-cue-text">纠错提示将显示于此；点击「开启语音播报」可朗读</span>
               </div>
               <button class="btn btn-secondary btn-small" id="toggle-voice" type="button">开启语音播报</button>
-            </div>
-            <div class="training-side-card" id="training-fatigue-card" hidden>
-              <h3 class="training-side-title">疲劳监测</h3>
-              <div class="fatigue-panel" id="fatigue-panel">
-                <div class="fatigue-score-wrap"><span class="fatigue-score" id="fatigue-score">—</span><span class="fatigue-label" id="fatigue-level">未检测</span></div>
-                <p class="hint" id="fatigue-recommendation">连接穿戴设备后可监测疲劳度。</p>
-                <ul class="fatigue-signals" id="fatigue-signals"></ul>
-              </div>
             </div>
             <div class="training-actions">
               <button class="btn btn-primary btn-block" id="start-camera" type="button">启动摄像头</button>
@@ -643,10 +635,13 @@
       </div>
     </div>
 
-    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <div class="toast" id="toast" role="status" aria-live="polite" aria-atomic="true">
+      <span class="toast-message" id="toast-message"></span>
+      <button class="toast-close" id="toast-close" type="button" aria-label="关闭通知">×</button>
+    </div>
 
-    <script src="config.js?v=20260625b"></script>
-    <script src="mock.js?v=20260625b"></script>
-    <script type="module" src="app.js?v=20260625b"></script>
+    <script src="config.js?v=20260626d"></script>
+    <script src="mock.js?v=20260626d"></script>
+    <script type="module" src="app.js?v=20260626d"></script>
   </body>
 </html>

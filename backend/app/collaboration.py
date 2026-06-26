@@ -142,33 +142,14 @@ def build_auto_adjustment(db: Session, prescription: models.PrescriptionModel) -
         )
         .all()
     )
-    metrics = (
-        db.query(models.WearableMetricModel)
-        .filter(models.WearableMetricModel.user_id == prescription.user_id)
-        .order_by(models.WearableMetricModel.recorded_at.desc())
-        .limit(20)
-        .all()
-    )
     base_actions = actions_for_prescription(db, prescription.id)
     completion_days = {item.trained_on for item in checkins}
     completion_rate = len(completion_days) / 14 if checkins else 0
     avg_pain_change = _avg([(item.pain_after or 0) - (item.pain_before or 0) for item in checkins if item.pain_before is not None and item.pain_after is not None])
-    high_fatigue = any(item.risk_level == "high" for item in metrics[:5])
 
     changes = []
     reasons = []
-    if high_fatigue:
-        reasons.append("近期穿戴设备提示疲劳风险偏高，建议降低训练负荷。")
-        for action in base_actions:
-            changes.append({
-                "operation": "update",
-                "action_id": action.get("id"),
-                "name": action.get("name"),
-                "sets": max(1, min(action.get("sets") or 1, 2)),
-                "reps": max(1, min(action.get("reps") or 1, 8)),
-                "note": "因疲劳风险偏高，系统建议临时降阶执行。",
-            })
-    elif avg_pain_change is not None and avg_pain_change > 1:
+    if avg_pain_change is not None and avg_pain_change > 1:
         reasons.append("训练后疼痛评分有上升趋势，建议降低幅度并延长休息。")
         for action in base_actions:
             changes.append({

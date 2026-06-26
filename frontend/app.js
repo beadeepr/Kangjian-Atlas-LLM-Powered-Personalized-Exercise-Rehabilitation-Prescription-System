@@ -108,6 +108,8 @@ const els = {
   feedbackList: document.getElementById("feedback-list"),
   modeBadge: document.getElementById("mode-badge"),
   toast: document.getElementById("toast"),
+  toastMessage: document.getElementById("toast-message"),
+  toastClose: document.getElementById("toast-close"),
   authAccount: document.getElementById("auth-account"),
   authPassword: document.getElementById("auth-password"),
   authRegisterAccount: document.getElementById("auth-register-account"),
@@ -159,21 +161,45 @@ const els = {
   prescriptionFeedbackForm: document.getElementById("prescription-feedback-form"),
 };
 
+const AUTH_TOKEN_KEY = "kj_auth_token";
+const AUTH_USER_KEY = "kj_auth_user";
+const LEGACY_AUTH_KEY = "kj_auth";
+
 function readStoredAuth() {
   try {
-    return JSON.parse(localStorage.getItem("kj_auth") || "null");
+    const token = sessionStorage.getItem(AUTH_TOKEN_KEY);
+    const userRaw = localStorage.getItem(AUTH_USER_KEY);
+    if (token && userRaw) {
+      return { token, user: JSON.parse(userRaw) };
+    }
+    const legacyRaw = localStorage.getItem(LEGACY_AUTH_KEY);
+    if (legacyRaw) {
+      const legacy = JSON.parse(legacyRaw);
+      if (legacy?.token) {
+        saveAuth(legacy);
+        return legacy;
+      }
+    }
+    return null;
   } catch (error) {
     return null;
   }
 }
 
 function saveAuth(auth) {
-  state.auth = auth;
-  if (auth) {
-    localStorage.setItem("kj_auth", JSON.stringify(auth));
+  if (auth?.token) {
+    state.auth = auth;
+    sessionStorage.setItem(AUTH_TOKEN_KEY, auth.token);
+    if (auth.user) {
+      localStorage.setItem(AUTH_USER_KEY, JSON.stringify(auth.user));
+    }
+    localStorage.removeItem(LEGACY_AUTH_KEY);
     syncCurrentUserFromAuth();
   } else {
-    localStorage.removeItem("kj_auth");
+    state.auth = null;
+    sessionStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_USER_KEY);
+    localStorage.removeItem(LEGACY_AUTH_KEY);
   }
   updateAuthStatus();
 }
@@ -206,7 +232,7 @@ function requireLogin() {
   if (isSessionReady()) {
     return true;
   }
-  showToast("请先登录或注册后再继续");
+  showWarnToast("请先登录或注册后再继续");
   goToStep("login");
   return false;
 }
@@ -311,7 +337,7 @@ async function submitAuth(mode) {
 
     if (!response.ok) {
       const detail = await parseApiError(response);
-      showToast(typeof detail === "string" ? detail : "账号或密码错误");
+      showErrorToast(typeof detail === "string" ? detail : "账号或密码错误");
       return;
     }
 
@@ -352,7 +378,7 @@ async function submitAuth(mode) {
     goToStep("intake");
   } catch (error) {
     const isNetworkError = error instanceof TypeError;
-    showToast(
+    showErrorToast(
       error?.name === "AbortError"
         ? "登录请求超时，请确认后端已启动"
         : isNetworkError
@@ -379,13 +405,35 @@ function logoutSession() {
   showToast("已退出登录");
 }
 
-function showToast(message) {
-  els.toast.textContent = message;
-  els.toast.classList.add("show");
+function hideToast() {
+  if (!els.toast) return;
   window.clearTimeout(showToast.timer);
-  showToast.timer = window.setTimeout(() => {
-    els.toast.classList.remove("show");
-  }, 3200);
+  els.toast.classList.remove("show", "toast-error", "toast-warn");
+}
+
+function showToast(message, options = {}) {
+  if (!els.toast || !els.toastMessage) return;
+  const type = options.type || "info";
+  const duration =
+    options.duration ??
+    (type === "error" ? 5600 : type === "warn" ? 4800 : 3200);
+
+  els.toastMessage.textContent = message;
+  els.toast.classList.remove("toast-error", "toast-warn");
+  if (type === "error") els.toast.classList.add("toast-error");
+  if (type === "warn") els.toast.classList.add("toast-warn");
+  els.toast.classList.add("show");
+
+  window.clearTimeout(showToast.timer);
+  showToast.timer = window.setTimeout(hideToast, duration);
+}
+
+function showErrorToast(message, options = {}) {
+  showToast(message, { ...options, type: "error" });
+}
+
+function showWarnToast(message, options = {}) {
+  showToast(message, { ...options, type: "warn" });
 }
 
 function setLoading(active, text = "正在处理…", progress = null) {
@@ -581,7 +629,7 @@ function apiReady() {
 // Shows a toast guiding the user and returns false; callers do `if (!requireApi()) return;`.
 function requireApi() {
   if (window.APP_CONFIG.DEMO_MODE) {
-    showToast("该功能需要切换到 API 模式并登录后使用");
+    showWarnToast("该功能需要切换到 API 模式并登录后使用");
     return false;
   }
   return requireLogin();
@@ -817,10 +865,10 @@ function hideDoubaoResult() {
 }
 
 function updateAdminEntry() {
-  const loggedIn = isSessionReady() && !window.APP_CONFIG.DEMO_MODE;
+  const loggedIn = isSessionReady();
   const isAdmin = state.currentUser?.role === "admin";
   if (els.adminEntryButton) {
-    els.adminEntryButton.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
+    els.adminEntryButton.hidden = !isAdmin || !loggedIn;
   }
   if (els.adminQuickNav) {
     els.adminQuickNav.hidden = !isAdmin || window.APP_CONFIG.DEMO_MODE;
@@ -1018,17 +1066,33 @@ function renderProfileCard(profile) {
 
 async function loadProfilesPage() {
   if (!els.profilesList) return;
-  if (!apiEnabled()) {
-    els.profilesList.innerHTML = "<p class=\"hint\">请先登录并切换到 API 模式。</p>";
+  if (window.APP_CONFIG.DEMO_MODE) {
+    renderDemoNotice(els.profilesList, { featureName: "健康档案" });
+    return;
+  }
+  if (!isSessionReady()) {
+    els.profilesList.innerHTML = "<p class=\"hint\">请先登录后查看健康档案。</p>";
     return;
   }
   els.profilesList.innerHTML = "<p class=\"hint\">正在加载…</p>";
-  await loadPatientProfiles();
-  if (!state.patientProfiles.length) {
-    els.profilesList.innerHTML = "<p class=\"hint\">暂无健康档案，可点击「新建档案」添加。</p>";
-    return;
+  try {
+    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/patient_profiles`, {
+      headers: authHeaders(),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    state.patientProfiles = await response.json();
+    renderPatientProfileSelect();
+    if (!state.patientProfiles.length) {
+      els.profilesList.innerHTML = "<p class=\"hint\">暂无健康档案，可点击「新建档案」添加。</p>";
+      return;
+    }
+    els.profilesList.innerHTML = state.patientProfiles.map(renderProfileCard).join("");
+  } catch {
+    renderLoadError(els.profilesList, {
+      message: "健康档案加载失败，请确认后端已启动后重试。",
+      onRetry: loadProfilesPage,
+    });
   }
-  els.profilesList.innerHTML = state.patientProfiles.map(renderProfileCard).join("");
 }
 
 async function saveProfileForm(event) {
@@ -1049,7 +1113,7 @@ async function saveProfileForm(event) {
     body: JSON.stringify(payload),
   });
   if (!response.ok) {
-    showToast("档案保存失败");
+    showErrorToast("档案保存失败");
     return;
   }
   const profile = await response.json();
@@ -1070,7 +1134,7 @@ async function deleteProfile(profileId) {
     { method: "DELETE", headers: authHeaders() }
   );
   if (!response.ok) {
-    showToast("删除失败");
+    showErrorToast("删除失败");
     return;
   }
   if (state.selectedPatientProfileId === profileId) state.selectedPatientProfileId = null;
@@ -1118,7 +1182,7 @@ async function deleteImagingReport(reportId) {
     { method: "DELETE", headers: authHeaders() }
   );
   if (!response.ok) {
-    showToast("删除失败");
+    showErrorToast("删除失败");
     return;
   }
   showToast("影像报告已删除");
@@ -1144,7 +1208,7 @@ async function loadImagingReports() {
     const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/imaging_reports${params}`, {
       headers: authHeaders(),
     });
-    if (!response.ok) return;
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const reports = await response.json();
     const seen = new Set();
     state.imagingReports = reports.filter((report) => {
@@ -1158,7 +1222,10 @@ async function loadImagingReports() {
     }
     els.imagingReportsList.innerHTML = state.imagingReports.map(renderImagingReportCard).join("");
   } catch {
-    els.imagingReportsList.innerHTML = "<p class=\"hint\">影像报告加载失败。</p>";
+    renderLoadError(els.imagingReportsList, {
+      message: "影像报告加载失败，请确认后端已启动后重试。",
+      onRetry: loadImagingReports,
+    });
   }
 }
 
@@ -1205,7 +1272,7 @@ async function uploadImagingReport() {
     });
     if (!response.ok) {
       const detail = await parseApiError(response);
-      showToast(detail || "上传失败");
+      showErrorToast(detail || "上传失败");
       return;
     }
     const report = await response.json();
@@ -1218,7 +1285,7 @@ async function uploadImagingReport() {
     document.getElementById("imaging-note").value = "";
     await loadImagingReports();
   } catch {
-    showToast("影像报告上传失败");
+    showErrorToast("影像报告上传失败");
   } finally {
     setLoading(false);
   }
@@ -1450,35 +1517,134 @@ function renderActionLibraryGrid() {
 }
 
 // ── M5: Voice cue ──
-async function fetchVoiceCue(feedback, status, score) {
-  if (!state.voiceEnabled || window.APP_CONFIG.DEMO_MODE) return;
-  try {
-    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/voice/cue`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ feedback, status, score, enabled: true }),
-    });
-    if (!response.ok) return;
-    const data = await response.json();
-    const textEl = document.getElementById("voice-cue-text");
-    if (textEl) textEl.textContent = data.text || "";
-    if (data.enabled && data.text && "speechSynthesis" in window) {
-      const utterance = new SpeechSynthesisUtterance(data.text);
-      utterance.lang = "zh-CN";
-      utterance.rate = data.rate || 1;
-      speechSynthesis.cancel();
-      speechSynthesis.speak(utterance);
-    }
-  } catch { /* voice is non-critical */ }
+let lastVoiceAnnouncedText = "";
+let voiceSpeaking = false;
+let pendingVoiceCue = null;
+
+function setVoiceCueText(text) {
+  const textEl = document.getElementById("voice-cue-text");
+  if (textEl && text) textEl.textContent = text;
 }
 
-function toggleVoice() {
-  state.voiceEnabled = !state.voiceEnabled;
+function resetVoiceCueState() {
+  lastVoiceAnnouncedText = "";
+  pendingVoiceCue = null;
+  voiceSpeaking = false;
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+}
+
+function normalizeVoiceFeedbackText(feedback) {
+  if (feedback == null) return "动作已记录，请保持稳定呼吸。";
+  const items = Array.isArray(feedback) ? feedback.filter(Boolean) : [String(feedback)];
+  const text = items.slice(0, 2).join("；").trim();
+  return text || "动作已记录，请保持稳定呼吸。";
+}
+
+function pickChineseSpeechVoice() {
+  if (!("speechSynthesis" in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return (
+    voices.find((voice) => voice.lang === "zh-CN") ||
+    voices.find((voice) => voice.lang.startsWith("zh")) ||
+    null
+  );
+}
+
+function primeSpeechSynthesis() {
+  if (!("speechSynthesis" in window)) return false;
+  window.speechSynthesis.getVoices();
+  if (window.speechSynthesis.paused) window.speechSynthesis.resume();
+  return true;
+}
+
+function flushPendingVoiceCue() {
+  if (!pendingVoiceCue || voiceSpeaking) return;
+  const next = pendingVoiceCue;
+  pendingVoiceCue = null;
+  if (next.text === lastVoiceAnnouncedText) return;
+  lastVoiceAnnouncedText = next.text;
+  startVoiceUtterance(next.text, next.rate);
+}
+
+function startVoiceUtterance(text, rate = 1) {
+  if (!text || !("speechSynthesis" in window)) return;
+
+  const speakNow = () => {
+    voiceSpeaking = true;
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = "zh-CN";
+    utterance.rate = rate;
+    utterance.volume = 1;
+    const voice = pickChineseSpeechVoice();
+    if (voice) utterance.voice = voice;
+    const finish = () => {
+      voiceSpeaking = false;
+      flushPendingVoiceCue();
+    };
+    utterance.onend = finish;
+    utterance.onerror = finish;
+    window.speechSynthesis.resume();
+    window.speechSynthesis.speak(utterance);
+  };
+
+  if (window.speechSynthesis.getVoices().length) {
+    speakNow();
+  } else {
+    window.speechSynthesis.addEventListener("voiceschanged", speakNow, { once: true });
+    primeSpeechSynthesis();
+  }
+}
+
+/** Short UI prompt (e.g. toggle on); does not affect pose cue dedupe. */
+function speakVoicePrompt(text, rate = 1) {
+  if (!text || !("speechSynthesis" in window)) return;
+  if ("speechSynthesis" in window) window.speechSynthesis.cancel();
+  voiceSpeaking = false;
+  pendingVoiceCue = null;
+  startVoiceUtterance(text, rate);
+}
+
+function playVoiceCue(feedback, status, score, voiceCue) {
+  const text = voiceCue?.text || normalizeVoiceFeedbackText(feedback);
+  setVoiceCueText(text);
+
+  if (!state.voiceEnabled) return;
+  // Each distinct cue is spoken at most once until the message changes.
+  if (text === lastVoiceAnnouncedText) return;
+
+  const rate = voiceCue?.rate || (status === "error" || (typeof score === "number" && score < 45) ? 0.92 : 1);
+
+  if (voiceSpeaking) {
+    pendingVoiceCue = { text, rate };
+    return;
+  }
+
+  lastVoiceAnnouncedText = text;
+  startVoiceUtterance(text, rate);
+}
+
+function syncVoiceToggleUi() {
   const btn = document.getElementById("toggle-voice");
   if (btn) btn.textContent = state.voiceEnabled ? "关闭语音播报" : "开启语音播报";
   const indicator = document.getElementById("voice-indicator");
   if (indicator) indicator.classList.toggle("active", state.voiceEnabled);
-  if (!state.voiceEnabled && "speechSynthesis" in window) speechSynthesis.cancel();
+}
+
+function toggleVoice() {
+  if (!("speechSynthesis" in window)) {
+    showWarnToast("当前浏览器不支持语音播报");
+    return;
+  }
+  primeSpeechSynthesis();
+  state.voiceEnabled = !state.voiceEnabled;
+  syncVoiceToggleUi();
+  if (state.voiceEnabled) {
+    setVoiceCueText("语音播报已开启");
+    speakVoicePrompt("语音播报已开启");
+  } else {
+    resetVoiceCueState();
+    setVoiceCueText("语音播报已关闭，纠错文字仍会显示");
+  }
 }
 
 // ── M5: Training counter ──
@@ -1518,28 +1684,6 @@ function countRep(status) {
     updateCounterDisplay();
   }
   state.lastRepStatus = status;
-}
-
-// ── M5: Fatigue monitoring ──
-async function loadFatigueStatus() {
-  const card = document.getElementById("training-fatigue-card");
-  if (!card || !isSessionReady() || window.APP_CONFIG.DEMO_MODE) return;
-  try {
-    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/wearables/fatigue/status`, { headers: authHeaders() });
-    if (!response.ok) return;
-    const data = await response.json();
-    card.hidden = false;
-    document.getElementById("fatigue-score").textContent = data.fatigue_score ?? "—";
-    const levelEl = document.getElementById("fatigue-level");
-    if (levelEl) {
-      levelEl.textContent = data.risk_level || "未检测";
-      levelEl.className = `fatigue-label fatigue-${data.risk_level || "low"}`;
-    }
-    document.getElementById("fatigue-recommendation").textContent = data.recommendation || "";
-    const signalsEl = document.getElementById("fatigue-signals");
-    if (signalsEl) signalsEl.innerHTML = (data.signals || []).map(s => `<li>${escapeAdminText(s)}</li>`).join("");
-    if (data.should_stop) showToast("疲劳度较高，建议暂停训练休息");
-  } catch { /* fatigue is optional */ }
 }
 
 // ── M6: Progress tracking page ──
@@ -1643,7 +1787,7 @@ async function exportProgressReport() {
     a.href = url; a.download = "康复周报.md"; a.click();
     URL.revokeObjectURL(url);
     showToast("周报已导出");
-  } catch { showToast("周报导出失败"); }
+  } catch { showErrorToast("周报导出失败"); }
 }
 
 // ── M7: Knowledge education page ──
@@ -1695,12 +1839,12 @@ function updateFeedbackStarRating(rating) {
 async function submitPrescriptionFeedback(event) {
   event.preventDefault();
   if (!requireLogin()) return;
-  const content = document.getElementById("feedback-content")?.value?.trim();
-  if (!content) {
-    showToast("请填写反馈内容");
+  const content = document.getElementById("feedback-content")?.value?.trim() || "";
+  const rating = state.feedbackRating || null;
+  if (!rating && !content) {
+    showToast("请选择满意度评分或填写反馈内容");
     return;
   }
-  const rating = state.feedbackRating || null;
   try {
     await apiSend("POST", "/feedback", {
       category: "prescription",
@@ -1712,7 +1856,7 @@ async function submitPrescriptionFeedback(event) {
     els.prescriptionFeedbackForm?.reset();
     updateFeedbackStarRating(0);
   } catch (error) {
-    showToast(error.message || "反馈提交失败");
+    showErrorToast(error.message || "反馈提交失败");
   }
 }
 
@@ -1830,7 +1974,7 @@ async function createPatientProfileFromIntake(formData) {
 async function exportPrescription(format) {
   const prescriptionId = state.prescription?.id;
   if (!prescriptionId || window.APP_CONFIG.DEMO_MODE) {
-    showToast("请先登录并在 API 模式下生成可导出的处方");
+    showWarnToast("请先登录并在 API 模式下生成可导出的处方");
     return;
   }
   if (!requireLogin()) return;
@@ -1849,7 +1993,7 @@ async function exportPrescription(format) {
     URL.revokeObjectURL(url);
     showToast(`处方已导出为 ${format.toUpperCase()}`);
   } catch {
-    showToast("处方导出失败，请确认已登录且后端可用");
+    showErrorToast("处方导出失败，请确认已登录且后端可用");
   }
 }
 
@@ -1921,7 +2065,10 @@ async function loadTrainingStats() {
       }
     `;
   } catch {
-    els.trainingStatsPanel.innerHTML = `<p class="hint">训练统计加载失败，请确认后端已启动。</p>`;
+    renderLoadError(els.trainingStatsPanel, {
+      message: "训练统计加载失败，请确认后端已启动后重试。",
+      onRetry: loadTrainingStats,
+    });
   }
 }
 
@@ -2419,9 +2566,22 @@ async function updateAdminFeedback(feedbackId, payload) {
 }
 
 async function loadAdminActions(options = {}) {
-  if (!els.adminActionsPanel || state.currentUser?.role !== "admin") return;
+  if (!els.adminActionsPanel) return;
   const { silent = false } = options;
   const scrollY = window.scrollY;
+
+  if (window.APP_CONFIG.DEMO_MODE) {
+    if (!silent) {
+      renderDemoNotice(els.adminActionsPanel, { featureName: "管理后台" });
+    }
+    return;
+  }
+  if (state.currentUser?.role !== "admin") {
+    if (!silent) {
+      els.adminActionsPanel.innerHTML = "<p class=\"hint\">需要管理员账号才能访问管理后台。</p>";
+    }
+    return;
+  }
 
   if (!silent) {
     els.adminActionsPanel.innerHTML = `<p class="hint">正在加载管理后台…</p>`;
@@ -2563,7 +2723,7 @@ function bindAdminPanelEvents() {
       try {
         await deleteAdminAction(deleteButton.dataset.actionId);
       } catch (error) {
-        showToast(error.message || "删除失败");
+        showErrorToast(error.message || "删除失败");
       }
       return;
     }
@@ -2605,7 +2765,7 @@ function bindAdminPanelEvents() {
       try {
         await submitAdminCreate(createForm);
       } catch (error) {
-        showToast(error.message || "新增动作失败");
+        showErrorToast(error.message || "新增动作失败");
       }
       return;
     }
@@ -2616,7 +2776,7 @@ function bindAdminPanelEvents() {
       try {
         await submitAdminEdit(editForm.dataset.actionId, editForm);
       } catch (error) {
-        showToast(error.message || "保存失败");
+        showErrorToast(error.message || "保存失败");
       }
       return;
     }
@@ -2634,7 +2794,7 @@ function bindAdminPanelEvents() {
         showToast("反馈已更新");
         await loadAdminActions({ silent: true });
       } catch (error) {
-        showToast(error.message || "更新失败");
+        showErrorToast(error.message || "更新失败");
       }
     }
   });
@@ -2906,7 +3066,7 @@ function renderPrescription(prescription) {
       const actionId = button.dataset.actionId;
       const action = prescription.actions.find((item) => item.id === actionId);
       if (!action) {
-        showToast("动作信息缺失，请稍后重试");
+        showErrorToast("动作信息缺失，请稍后重试");
         return;
       }
       showDemo(action);
@@ -2915,7 +3075,7 @@ function renderPrescription(prescription) {
 }
 
 function updatePoseFeedback(result) {
-  const { feedback, score, status } = result;
+  const { feedback, score, status, voice_cue: voiceCue } = result;
   if (typeof score === "number") {
     state.trainingLastScore = score;
   }
@@ -2950,7 +3110,7 @@ function updatePoseFeedback(result) {
     navigator.vibrate(80);
   }
   countRep(status);
-  fetchVoiceCue(feedback, status, score);
+  playVoiceCue(feedback, status, score, voiceCue);
 }
 
 async function correctPose(payload) {
@@ -2975,6 +3135,7 @@ async function correctPose(payload) {
     feedback: data.feedback || ["暂无反馈"],
     score: data.score ?? 0,
     status: data.status || "warning",
+    voice_cue: data.voice_cue || null,
   };
 }
 
@@ -3181,7 +3342,7 @@ async function showDemoAsync(action) {
 
 function startTraining(action) {
   if (!window.APP_CONFIG.isPoseSupported(action.id)) {
-    showToast("该动作暂不支持实时纠正，请选择支持的动作进行跟练。");
+    showWarnToast("该动作暂不支持实时纠正，请选择支持的动作进行跟练。");
     return;
   }
   stopPrescriptionLoading();
@@ -3210,12 +3371,18 @@ function startTraining(action) {
   goToStep("training");
   preloadPoseTracker();
   startTrainingCounter();
-  loadFatigueStatus();
+  resetVoiceCueState();
+  syncVoiceToggleUi();
+  setVoiceCueText(
+    state.voiceEnabled
+      ? "等待动作检测…"
+      : "纠错提示将显示于此；点击「开启语音播报」可朗读"
+  );
 }
 
 async function startCamera() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    showToast("当前浏览器不支持摄像头");
+    showErrorToast("当前浏览器不支持摄像头");
     return;
   }
 
@@ -3239,10 +3406,18 @@ async function startCamera() {
     state.poseTracker.start();
     if (els.feedbackOverlay) els.feedbackOverlay.textContent = "等待检测…";
     els.statusText.textContent = "实时检测中";
+    if (!state.voiceEnabled && "speechSynthesis" in window) {
+      state.voiceEnabled = true;
+      syncVoiceToggleUi();
+      setVoiceCueText("语音播报已开启");
+      speakVoicePrompt("语音播报已开启");
+    } else {
+      setVoiceCueText(state.voiceEnabled ? "正在检测，请做动作…" : "纠错提示将显示于此");
+    }
     showToast("摄像头已启动，正在实时分析动作");
   } catch (error) {
     stopCamera();
-    showToast("无法访问摄像头或姿态模型加载失败，请检查浏览器权限与网络");
+    showErrorToast("无法访问摄像头或姿态模型加载失败，请检查浏览器权限与网络");
   } finally {
     setCameraLoading(false);
     if (els.startCameraButton && state.cameraStream) {
@@ -3280,13 +3455,13 @@ function completeTraining() {
   const painAfter = els.checkinPainAfter?.value ? Number(els.checkinPainAfter.value) : null;
   const note = els.checkinNote?.value?.trim() || null;
 
-  const finish = (message = "训练已完成，可继续跟练其他动作或返回问诊") => {
+  const finish = (message = "训练已完成，可继续跟练其他动作或返回问诊", toastOptions = {}) => {
     if (completeButton) {
       completeButton.disabled = false;
       completeButton.textContent = "完成训练，返回处方";
     }
     goToStep("prescription");
-    showToast(message);
+    showToast(message, toastOptions);
   };
 
   if (window.APP_CONFIG.DEMO_MODE || !isSessionReady()) {
@@ -3299,7 +3474,10 @@ function completeTraining() {
       finish("训练打卡已保存");
     })
     .catch((error) => {
-      finish(typeof error.message === "string" ? error.message : "训练打卡保存失败");
+      finish(
+        typeof error.message === "string" ? error.message : "训练打卡保存失败",
+        { type: "error" }
+      );
     });
 }
 
@@ -3322,7 +3500,7 @@ function applyDevModeUi() {
 
 async function testDoubaoConnection() {
   if (window.APP_CONFIG.DEMO_MODE) {
-    showToast("请先关闭 Demo 模式再测试 DeepSeek 连接");
+    showWarnToast("请先关闭 Demo 模式再测试 DeepSeek 连接");
     return;
   }
 
@@ -3343,11 +3521,11 @@ async function testDoubaoConnection() {
       showDoubaoResult(summaryContent);
     } else {
       showDoubaoResult(data);
-      showToast(`DeepSeek 连接失败：${data.detail || "未知错误"}`);
+      showErrorToast(`DeepSeek 连接失败：${data.detail || "未知错误"}`);
     }
   } catch (error) {
     showDoubaoResult({ error: "DeepSeek 测试请求失败，请检查后端与环境变量" });
-    showToast("DeepSeek 测试请求失败，请检查后端与环境变量");
+    showErrorToast("DeepSeek 测试请求失败，请检查后端与环境变量");
   } finally {
     setLoading(false);
   }
@@ -3382,6 +3560,8 @@ function updateModeBadge() {
 }
 
 function bindEvents() {
+  els.toastClose?.addEventListener("click", hideToast);
+
   els.authLoginForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     submitAuth("login");
@@ -3437,16 +3617,16 @@ function bindEvents() {
       if (error?.code === "red_flag_detected") {
         showRedFlagAlert(error.message, error.redFlags);
         els.symptomsError.textContent = "主诉含红旗症状，请查看屏幕中央预警提示";
-        showToast("检测到红旗症状，已暂停生成处方");
+        showWarnToast("检测到红旗症状，已暂停生成处方");
       } else if (error?.status === 400) {
         if (error.message.includes("疼痛部位")) {
           els.painRegionsError.textContent = error.message;
         } else {
           els.symptomsError.textContent = error.message;
         }
-        showToast(error.message);
+        showErrorToast(error.message);
       } else {
-        showToast(
+        showErrorToast(
           isTimeout
             ? "DeepSeek 生成超时，请稍后重试或检查后端配置"
             : "处方服务失败，请检查后端与 DeepSeek_API_KEY"
@@ -3496,9 +3676,9 @@ function bindEvents() {
     try {
       const profile = await createPatientProfileFromIntake(formData);
       if (profile) showToast(`已保存患者档案：${profile.name}`);
-      else showToast("患者档案保存失败");
+      else showErrorToast("患者档案保存失败");
     } catch {
-      showToast("患者档案保存失败，请确认后端已启动");
+      showErrorToast("患者档案保存失败，请确认后端已启动");
     }
   });
 
@@ -3652,6 +3832,11 @@ function init() {
   updateMobilityTierDisplay(Number(els.mobilityScore?.value || 5));
   updateMobilitySummary(Number(els.mobilityScore?.value || 5));
   switchAuthTab("login");
+
+  if ("speechSynthesis" in window) {
+    window.speechSynthesis.addEventListener("voiceschanged", primeSpeechSynthesis);
+    primeSpeechSynthesis();
+  }
 
   if (isSessionReady()) {
     loadPatientProfiles();

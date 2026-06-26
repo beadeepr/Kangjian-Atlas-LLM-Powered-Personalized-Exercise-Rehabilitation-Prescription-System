@@ -1278,18 +1278,60 @@ textarea {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%) translateY(120%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(92vw, 480px);
   background: rgba(17, 24, 39, 0.92);
   color: #fff;
-  padding: 12px 18px;
+  padding: 12px 14px 12px 18px;
   border-radius: 14px;
   transition: transform 0.25s ease;
   z-index: 20;
   backdrop-filter: blur(10px);
   box-shadow: 0 16px 38px rgba(0, 0, 0, 0.22);
+  pointer-events: none;
 }
 
 .toast.show {
   transform: translateX(-50%) translateY(0);
+  pointer-events: auto;
+}
+
+.toast-message {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.45;
+}
+
+.toast-close {
+  flex-shrink: 0;
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 1.35rem;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.toast-close:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.toast-close:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.65);
+  outline-offset: 2px;
+}
+
+.toast.toast-error {
+  background: rgba(127, 29, 29, 0.94);
+}
+
+.toast.toast-warn {
+  background: rgba(120, 53, 15, 0.94);
 }
 
 .loading-overlay {
@@ -2649,16 +2691,6 @@ textarea {
 @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
 
 /* ── M5: Fatigue ── */
-.fatigue-panel { text-align: center; }
-.fatigue-score-wrap { display: flex; align-items: baseline; justify-content: center; gap: 8px; margin-bottom: 8px; }
-.fatigue-score { font-size: 2rem; font-weight: 800; }
-.fatigue-label { font-weight: 600; }
-.fatigue-low { color: var(--success); }
-.fatigue-medium { color: var(--warning); }
-.fatigue-high { color: var(--danger); }
-.fatigue-signals { list-style: none; padding: 0; margin: 8px 0 0; font-size: 0.88rem; }
-.fatigue-signals li { padding: 4px 0; color: var(--muted); }
-
 /* ── M6: Progress page ── */
 .progress-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px; }
 .progress-stat-card { text-align: center; padding: 16px 12px; border-radius: 16px; background: rgba(250, 252, 255, 0.9); border: 1px solid rgba(26, 115, 232, 0.12); }

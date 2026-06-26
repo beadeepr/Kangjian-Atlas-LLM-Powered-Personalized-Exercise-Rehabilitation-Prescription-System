@@ -91,11 +91,8 @@ from .schema import (
     UserCreateRequest,
     UserLoginRequest,
     UserResponse,
-    FatigueStatusResponse,
     VoiceCueRequest,
     VoiceCueResponse,
-    WearableMetricCreateRequest,
-    WearableMetricResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
@@ -576,9 +573,11 @@ def get_optional_user(
 
 def clean_feedback_payload(req: FeedbackCreateRequest):
     category = (req.category or "general").strip() or "general"
-    content = req.content.strip() if req.content else ""
+    content = (req.content or "").strip()
+    if not content and req.rating is None:
+        raise HTTPException(status_code=400, detail="feedback content or rating required")
     if not content:
-        raise HTTPException(status_code=400, detail="feedback content required")
+        content = "（仅评分，无文字反馈）"
     if len(content) > 2000:
         raise HTTPException(status_code=400, detail="feedback content too long")
     if req.rating is not None and not 1 <= req.rating <= 5:
@@ -1411,12 +1410,6 @@ def correct_pose(req: PoseCorrectionRequest, db: Session = Depends(get_db)):
     )
 
 
-def wearable_metric_response(metric):
-    from .fatigue import metric_to_dict
-
-    return WearableMetricResponse(**metric_to_dict(metric))
-
-
 def _pose_frame_from_request(req: PoseFrameRequest):
     from .pose_runtime import PoseFrame
     import uuid
@@ -1601,7 +1594,7 @@ def visual_ar_overlay(req: AROverlayRequest, current_user=Depends(get_current_us
 
 
 @router.post("/voice/cue", response_model=VoiceCueResponse)
-def create_voice_cue(req: VoiceCueRequest, current_user=Depends(get_current_user)):
+def create_voice_cue(req: VoiceCueRequest):
     from .voice_feedback import DEFAULT_VOICE, build_voice_cue
 
     feedback = req.feedback if req.feedback is not None else req.text
@@ -1613,122 +1606,6 @@ def create_voice_cue(req: VoiceCueRequest, current_user=Depends(get_current_user
         voice=req.voice or DEFAULT_VOICE,
     )
     return VoiceCueResponse(**cue)
-
-
-def _validate_wearable_payload(req: WearableMetricCreateRequest):
-    ranges = {
-        "heart_rate": (30, 220),
-        "resting_heart_rate": (30, 120),
-        "hrv_ms": (1, 250),
-        "spo2": (70, 100),
-        "steps": (0, 100000),
-        "calories": (0, 10000),
-        "perceived_exertion": (1, 10),
-        "duration_minutes": (0, 600),
-    }
-    data = req.model_dump() if hasattr(req, "model_dump") else req.dict()
-    for field, (min_value, max_value) in ranges.items():
-        value = data.get(field)
-        if value is not None and not min_value <= value <= max_value:
-            raise HTTPException(status_code=400, detail=f"{field} must be between {min_value} and {max_value}")
-    if req.skin_temperature_c is not None and not 30 <= req.skin_temperature_c <= 43:
-        raise HTTPException(status_code=400, detail="skin_temperature_c must be between 30 and 43")
-
-
-@router.post("/wearables/metrics", response_model=WearableMetricResponse, status_code=201)
-def create_wearable_metric(
-    req: WearableMetricCreateRequest,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    from .fatigue import evaluate_fatigue
-
-    _validate_wearable_payload(req)
-    if req.patient_profile_id is not None:
-        validate_training_links(db, current_user.id, req.patient_profile_id, None)
-    if req.training_checkin_id is not None:
-        checkin = get_training_checkin(db, checkin_id=req.training_checkin_id, user_id=current_user.id)
-        if not checkin:
-            raise HTTPException(status_code=404, detail="Training checkin not found")
-
-    previous = (
-        db.query(models.WearableMetricModel)
-        .filter(models.WearableMetricModel.user_id == current_user.id)
-        .order_by(models.WearableMetricModel.recorded_at.desc())
-        .limit(20)
-        .all()
-    )
-    evaluation = evaluate_fatigue(
-        heart_rate=req.heart_rate,
-        resting_heart_rate=req.resting_heart_rate,
-        hrv_ms=req.hrv_ms,
-        spo2=req.spo2,
-        perceived_exertion=req.perceived_exertion,
-        duration_minutes=req.duration_minutes,
-        previous_metrics=previous,
-    )
-    metric = models.WearableMetricModel(
-        user_id=current_user.id,
-        patient_profile_id=req.patient_profile_id,
-        training_checkin_id=req.training_checkin_id,
-        device_type=req.device_type,
-        heart_rate=req.heart_rate,
-        resting_heart_rate=req.resting_heart_rate,
-        hrv_ms=req.hrv_ms,
-        spo2=req.spo2,
-        steps=req.steps,
-        calories=req.calories,
-        skin_temperature_c=req.skin_temperature_c,
-        perceived_exertion=req.perceived_exertion,
-        duration_minutes=req.duration_minutes,
-        fatigue_score=evaluation["fatigue_score"],
-        risk_level=evaluation["risk_level"],
-        signals=evaluation["signals"],
-        recommendation=evaluation["recommendation"],
-        recorded_at=req.recorded_at or datetime.utcnow(),
-    )
-    db.add(metric)
-    db.commit()
-    db.refresh(metric)
-    return wearable_metric_response(metric)
-
-
-@router.get("/wearables/metrics", response_model=list[WearableMetricResponse])
-def list_wearable_metrics(
-    patient_profile_id: int | None = None,
-    limit: int = 50,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    if limit < 1 or limit > 200:
-        raise HTTPException(status_code=400, detail="limit must be between 1 and 200")
-    if patient_profile_id is not None:
-        validate_training_links(db, current_user.id, patient_profile_id, None)
-    query = db.query(models.WearableMetricModel).filter(models.WearableMetricModel.user_id == current_user.id)
-    if patient_profile_id is not None:
-        query = query.filter(models.WearableMetricModel.patient_profile_id == patient_profile_id)
-    metrics = query.order_by(models.WearableMetricModel.recorded_at.desc()).limit(limit).all()
-    return [wearable_metric_response(metric) for metric in metrics]
-
-
-@router.get("/wearables/fatigue/status", response_model=FatigueStatusResponse)
-def read_fatigue_status(
-    patient_profile_id: int | None = None,
-    window_minutes: int = 30,
-    db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
-):
-    from .fatigue import summarize_recent_metrics
-
-    if window_minutes < 1 or window_minutes > 720:
-        raise HTTPException(status_code=400, detail="window_minutes must be between 1 and 720")
-    if patient_profile_id is not None:
-        validate_training_links(db, current_user.id, patient_profile_id, None)
-    query = db.query(models.WearableMetricModel).filter(models.WearableMetricModel.user_id == current_user.id)
-    if patient_profile_id is not None:
-        query = query.filter(models.WearableMetricModel.patient_profile_id == patient_profile_id)
-    metrics = query.order_by(models.WearableMetricModel.recorded_at.desc()).limit(100).all()
-    return FatigueStatusResponse(**summarize_recent_metrics(metrics, window_minutes=window_minutes))
 
 
 @router.post("/doctor_links", response_model=DoctorPatientLinkResponse, status_code=201)

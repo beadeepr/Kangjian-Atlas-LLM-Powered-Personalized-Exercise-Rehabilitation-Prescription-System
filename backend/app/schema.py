@@ -34,7 +34,7 @@ class LoginResponse(BaseModel):
 class FeedbackCreateRequest(BaseModel):
     category: Optional[str] = "general"
     rating: Optional[int] = None
-    content: str
+    content: Optional[str] = ""
     contact: Optional[str] = None
     source: Optional[str] = None
 
@@ -484,56 +484,6 @@ class AROverlayRequest(BaseModel):
 
 class AROverlayResponse(BaseModel):
     ar_overlay: dict
-
-
-class WearableMetricCreateRequest(BaseModel):
-    patient_profile_id: Optional[int] = None
-    training_checkin_id: Optional[int] = None
-    device_type: Optional[str] = None
-    heart_rate: Optional[int] = None
-    resting_heart_rate: Optional[int] = None
-    hrv_ms: Optional[int] = None
-    spo2: Optional[int] = None
-    steps: Optional[int] = None
-    calories: Optional[int] = None
-    skin_temperature_c: Optional[float] = None
-    perceived_exertion: Optional[int] = None
-    duration_minutes: Optional[int] = None
-    recorded_at: Optional[datetime] = None
-
-
-class WearableMetricResponse(BaseModel):
-    id: int
-    user_id: int
-    patient_profile_id: Optional[int] = None
-    training_checkin_id: Optional[int] = None
-    device_type: Optional[str] = None
-    heart_rate: Optional[int] = None
-    resting_heart_rate: Optional[int] = None
-    hrv_ms: Optional[int] = None
-    spo2: Optional[int] = None
-    steps: Optional[int] = None
-    calories: Optional[int] = None
-    skin_temperature_c: Optional[float] = None
-    perceived_exertion: Optional[int] = None
-    duration_minutes: Optional[int] = None
-    fatigue_score: int
-    risk_level: str
-    signals: List[str] = []
-    recommendation: Optional[str] = None
-    recorded_at: Optional[datetime] = None
-    created_at: Optional[datetime] = None
-
-
-class FatigueStatusResponse(BaseModel):
-    latest: Optional[dict] = None
-    fatigue_score: int
-    risk_level: str
-    signals: Optional[List[str]] = []
-    recommendation: str
-    should_stop: bool
-    sample_count: int
-    averages: Optional[dict] = None
 
 
 class DoctorPatientLinkCreateRequest(BaseModel):
