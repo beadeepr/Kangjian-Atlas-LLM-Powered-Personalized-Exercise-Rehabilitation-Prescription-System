@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from .knowledge import REGION_HINTS, load_action_library, select_actions_for_request
@@ -94,6 +95,15 @@ def build_knowledge_articles(
     return articles[: max(1, min(limit, 30))]
 
 
+def _strip_markdown(text: str) -> str:
+    cleaned = text.strip()
+    cleaned = re.sub(r"\*\*(.+?)\*\*", r"\1", cleaned)
+    cleaned = re.sub(r"\*(.+?)\*", r"\1", cleaned)
+    cleaned = re.sub(r"^#{1,6}\s*", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"`([^`]+)`", r"\1", cleaned)
+    return cleaned.strip()
+
+
 def _format_rag_contexts(rag_contexts: list[dict[str, Any]]) -> str:
     if not rag_contexts:
         return "暂无额外检索上下文。"
@@ -129,7 +139,7 @@ def _build_knowledge_answer_prompt(
 1. 第一段必须正面回答用户的具体问题，不要只泛泛介绍部位康复原则。
 2. 说明可以做什么、暂时避免什么、如何判断是否需要降级或就医。
 3. 只给科普建议，不替代医生诊断；不要编造资料中没有的动作或医学结论。
-4. 用自然中文输出，控制在 250-450 字，分 3-5 个短段落或要点。
+4. 用自然中文纯文本输出，控制在 250-450 字，分 3-5 个短段落；不要使用 Markdown 标记（如 **、#、- 列表符号）。
 
 用户问题：
 {question}
@@ -193,7 +203,7 @@ def _generate_knowledge_answer(
     answer = (result.get("text") or "").strip() if isinstance(result, dict) else ""
     if not answer:
         raise RuntimeError("DeepSeek returned empty answer")
-    return answer
+    return _strip_markdown(answer)
 
 
 def answer_knowledge_question(question: str, pain_regions: list[str] | None = None, limit: int = 4) -> dict[str, Any]:
