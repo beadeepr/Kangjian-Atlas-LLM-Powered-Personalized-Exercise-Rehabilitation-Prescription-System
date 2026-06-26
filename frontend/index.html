@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>康健图谱 - 个性化运动康复处方</title>
-    <link rel="stylesheet" href="style.css?v=20260626d" />
+    <link rel="stylesheet" href="style.css?v=20260626f" />
   </head>
   <body>
     <header class="app-header">
@@ -24,13 +24,16 @@
         </div>
         <span class="mode-badge demo" id="mode-badge">Demo 模式</span>
         <button class="btn btn-secondary btn-small" id="toggle-demo" type="button">切换 API 模式</button>
-        <button class="btn btn-secondary btn-small" id="go-profiles" type="button" hidden>健康档案</button>
-        <button class="btn btn-secondary btn-small" id="go-library" type="button" hidden>动作库</button>
-        <button class="btn btn-secondary btn-small" id="go-progress" type="button" hidden>康复进度</button>
-        <button class="btn btn-secondary btn-small" id="go-knowledge" type="button" hidden>知识科普</button>
         <button class="btn btn-secondary btn-small dev-only" id="test-doubao" type="button">测试 DeepSeek</button>
-        <button class="btn btn-secondary btn-small" id="go-admin" type="button" hidden>管理后台</button>
         <button class="btn btn-secondary btn-small" id="logout-button" type="button" hidden>退出登录</button>
+        <div class="header-secondary-group" id="header-secondary-group" hidden>
+          <button class="btn btn-secondary btn-small" id="go-profiles" type="button" hidden>健康档案</button>
+          <button class="btn btn-secondary btn-small" id="go-library" type="button" hidden>动作库</button>
+          <button class="btn btn-secondary btn-small" id="go-progress" type="button" hidden>康复进度</button>
+          <button class="btn btn-secondary btn-small" id="go-knowledge" type="button" hidden>知识科普</button>
+          <button class="btn btn-secondary btn-small" id="go-admin" type="button" hidden>管理后台</button>
+        </div>
+        <button class="btn btn-secondary btn-small header-secondary-toggle" id="header-secondary-toggle" type="button" hidden aria-expanded="false" aria-controls="header-secondary-group">更多 ▾</button>
       </div>
       <button
         class="btn btn-secondary btn-small header-menu-toggle"
@@ -640,8 +643,8 @@
       <button class="toast-close" id="toast-close" type="button" aria-label="关闭通知">×</button>
     </div>
 
-    <script src="config.js?v=20260626d"></script>
-    <script src="mock.js?v=20260626d"></script>
-    <script type="module" src="app.js?v=20260626d"></script>
+    <script src="config.js?v=20260626f"></script>
+    <script src="mock.js?v=20260626f"></script>
+    <script type="module" src="app.js?v=20260626f"></script>
   </body>
 </html>
