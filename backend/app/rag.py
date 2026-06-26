@@ -33,6 +33,71 @@ def _tokenize(text: str) -> list[str]:
     return [token for token in [*words, *bigrams] if token.strip()]
 
 
+QUERY_EXPANSIONS = {
+    "颈": ["颈部", "颈椎", "脖子", "低头", "下巴回收", "肩颈疼痛"],
+    "脖": ["颈部", "颈椎", "下巴回收", "颈部侧屈"],
+    "肩": ["肩部", "肩胛", "圆肩", "肩胛后缩", "胸椎伸展"],
+    "腰": ["腰部", "腰椎", "久坐", "核心稳定", "骨盆后倾", "鸟狗式", "臀桥"],
+    "坐骨": ["腰部", "腰椎间盘突出", "核心稳定", "神经症状"],
+    "膝": ["膝关节", "股四头肌", "靠墙静蹲", "直腿抬高", "上下楼"],
+    "踝": ["踝关节", "脚踝", "踝泵", "小腿后侧拉伸", "平衡训练"],
+    "脚踝": ["踝关节", "踝泵", "扭伤", "小腿后侧拉伸"],
+    "肿": ["肿胀", "急性期", "降低强度", "就医评估"],
+    "麻": ["麻木", "无力", "神经症状", "及时就医"],
+    "无力": ["麻木", "神经症状", "及时就医"],
+    "久坐": ["腰部", "核心稳定", "骨盆后倾", "活动度"],
+}
+
+
+def _expand_query(query: str, body_regions: list[str] | None = None) -> str:
+    text = (query or "").strip()
+    terms = [text]
+    for region in body_regions or []:
+        terms.append(region)
+        for key, expansions in QUERY_EXPANSIONS.items():
+            if key in region:
+                terms.extend(expansions)
+    for key, expansions in QUERY_EXPANSIONS.items():
+        if key in text:
+            terms.extend(expansions)
+    deduped = []
+    seen = set()
+    for term in terms:
+        term = (term or "").strip()
+        if term and term not in seen:
+            seen.add(term)
+            deduped.append(term)
+    return " ".join(deduped)
+
+
+def _lexical_score(query: str, document: dict[str, Any]) -> float:
+    query_tokens = set(_tokenize(query))
+    if not query_tokens:
+        return 0.0
+    metadata = document.get("metadata") or {}
+    metadata_text = " ".join(
+        json.dumps(value, ensure_ascii=False) if isinstance(value, (list, dict)) else str(value)
+        for value in metadata.values()
+        if value is not None
+    )
+    text = f"{document.get('text', '')} {metadata_text}".lower()
+    doc_tokens = set(_tokenize(text))
+    overlap = query_tokens & doc_tokens
+    if not overlap:
+        return 0.0
+    score = len(overlap) / max(1, len(query_tokens))
+    title = str(metadata.get("title") or "").lower()
+    body_regions = metadata.get("body_regions") or []
+    target_conditions = metadata.get("target_conditions") or []
+    if any(token in title for token in query_tokens):
+        score += 0.15
+    if any(str(region).lower() in query.lower() for region in body_regions):
+        score += 0.25
+    if any(str(condition).lower() in query.lower() for condition in target_conditions):
+        score += 0.2
+    return score
+
+
 class HashingEmbeddings:
     """Small deterministic embedding model used by all vector-store adapters."""
 
@@ -211,14 +276,18 @@ class LocalVectorStore:
             if not _metadata_matches(document.get("metadata") or {}, filters):
                 continue
             score = _cosine(query_vector, document.get("vector") or [])
-            if score <= 0:
+            lexical = _lexical_score(query, document)
+            combined_score = (score * 0.65) + (lexical * 0.35)
+            if combined_score <= 0:
                 continue
             results.append(
                 {
                     "id": document["id"],
                     "text": document["text"],
                     "metadata": document.get("metadata") or {},
-                    "score": round(score, 4),
+                    "score": round(combined_score, 4),
+                    "vector_score": round(score, 4),
+                    "lexical_score": round(lexical, 4),
                 }
             )
         results.sort(key=lambda item: item["score"], reverse=True)
@@ -460,14 +529,18 @@ def get_vector_store():
     errors = []
     if provider in {"auto", "chroma"}:
         try:
-            return ChromaVectorStore()
+            store = ChromaVectorStore()
+            store.status()
+            return store
         except Exception as exc:
             errors.append(f"chroma unavailable: {exc}")
             if provider == "chroma":
                 raise
     if provider in {"auto", "qdrant"}:
         try:
-            return QdrantVectorStore()
+            store = QdrantVectorStore()
+            store.status()
+            return store
         except Exception as exc:
             errors.append(f"qdrant unavailable: {exc}")
             if provider == "qdrant":
@@ -492,35 +565,42 @@ def retrieve_contexts(
 ) -> list[dict[str, Any]]:
     if not query or not query.strip():
         return []
+    expanded_query = _expand_query(query, body_regions)
     filters = {
         "body_regions": body_regions,
         "kind": kind,
     }
     store = get_vector_store()
     try:
-        results = store.search(query=query, limit=limit, filters=filters)
+        results = store.search(query=expanded_query, limit=limit, filters=filters)
         if results:
             return results
         if filters:
-            relaxed_results = store.search(query=query, limit=limit, filters=None)
+            relaxed_results = store.search(query=expanded_query, limit=limit, filters=None)
             if relaxed_results:
                 return relaxed_results
         status = store.status()
         if status.get("indexed_documents", 0) == 0:
             store.reindex(build_index_documents())
-            results = store.search(query=query, limit=limit, filters=filters)
+            results = store.search(query=expanded_query, limit=limit, filters=filters)
             if results:
                 return results
-            return store.search(query=query, limit=limit, filters=None)
+            return store.search(query=expanded_query, limit=limit, filters=None)
         return results
     except Exception:
         fallback = LocalVectorStore()
-        return fallback.search(query=query, limit=limit, filters=filters)
+        return fallback.search(query=expanded_query, limit=limit, filters=filters)
 
 
 def rag_status() -> dict[str, Any]:
     store = get_vector_store()
-    status = store.status()
+    try:
+        status = store.status()
+    except Exception as exc:
+        fallback = LocalVectorStore()
+        fallback._errors = [f"{getattr(store, 'provider', 'vector store')} status unavailable: {exc}"]
+        store = fallback
+        status = store.status()
     errors = getattr(store, "_errors", [])
     if errors:
         status["fallback_reasons"] = errors

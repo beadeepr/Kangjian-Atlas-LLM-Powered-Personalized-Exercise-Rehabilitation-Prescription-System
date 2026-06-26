@@ -27,6 +27,7 @@ from .crud import (
     get_imaging_report,
     get_patient_profile,
     get_prescription,
+    get_latest_training_checkin_date,
     get_training_checkin,
     get_user_by_account,
     list_imaging_reports,
@@ -52,7 +53,9 @@ from .schema import (
     FeedbackUpdateRequest,
     ImagingReportCreateRequest,
     ImagingReportResponse,
+    KnowledgeArticleGenerateRequest,
     KnowledgeArticleListResponse,
+    KnowledgeGeneratedArticleResponse,
     KnowledgeQARequest,
     KnowledgeQAResponse,
     LoginResponse,
@@ -344,6 +347,74 @@ def normalize_trend_dates(days: int, start_date: date | None, end_date: date | N
     if (resolved_end - resolved_start).days > 179:
         raise HTTPException(status_code=400, detail="date range cannot exceed 180 days")
     return resolved_start, resolved_end
+
+
+def resolve_training_data_window(
+    db: Session,
+    user_id: int,
+    days: int,
+    start_date: date | None,
+    end_date: date | None,
+    patient_profile_id: int | None = None,
+):
+    resolved_start, resolved_end = normalize_trend_dates(days, start_date, end_date)
+    has_explicit_dates = start_date is not None or end_date is not None
+    if has_explicit_dates:
+        return resolved_start, resolved_end
+
+    checkins = list_training_checkins(
+        db,
+        user_id=user_id,
+        patient_profile_id=patient_profile_id,
+        start_date=resolved_start,
+        end_date=resolved_end,
+    )
+    if checkins:
+        return resolved_start, resolved_end
+
+    latest_date = get_latest_training_checkin_date(
+        db,
+        user_id=user_id,
+        patient_profile_id=patient_profile_id,
+    )
+    if latest_date is None:
+        return resolved_start, resolved_end
+    return latest_date - timedelta(days=days - 1), latest_date
+
+
+def resolve_report_data_window(
+    db: Session,
+    user_id: int,
+    period: str,
+    start_date: date | None,
+    end_date: date | None,
+    patient_profile_id: int | None = None,
+):
+    from .progress_reports import normalize_report_dates
+
+    period, resolved_start, resolved_end = normalize_report_dates(period, start_date, end_date)
+    has_explicit_dates = start_date is not None or end_date is not None
+    if has_explicit_dates:
+        return period, resolved_start, resolved_end
+
+    checkins = list_training_checkins(
+        db,
+        user_id=user_id,
+        patient_profile_id=patient_profile_id,
+        start_date=resolved_start,
+        end_date=resolved_end,
+    )
+    if checkins:
+        return period, resolved_start, resolved_end
+
+    latest_date = get_latest_training_checkin_date(
+        db,
+        user_id=user_id,
+        patient_profile_id=patient_profile_id,
+    )
+    if latest_date is None:
+        return period, resolved_start, resolved_end
+    return normalize_report_dates(period, None, latest_date)
 
 
 def clean_action_payload(req: ActionItem | ActionUpdateRequest, partial: bool = False):
@@ -854,9 +925,16 @@ def read_training_trends_api(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    start_date, end_date = normalize_trend_dates(days, start_date, end_date)
     if patient_profile_id is not None:
         validate_training_links(db, current_user.id, patient_profile_id, None)
+    start_date, end_date = resolve_training_data_window(
+        db,
+        user_id=current_user.id,
+        days=days,
+        start_date=start_date,
+        end_date=end_date,
+        patient_profile_id=patient_profile_id,
+    )
     points = build_training_trends(
         db,
         user_id=current_user.id,
@@ -878,9 +956,16 @@ def read_training_visualization_api(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    start_date, end_date = normalize_trend_dates(days, None, None)
     if patient_profile_id is not None:
         validate_training_links(db, current_user.id, patient_profile_id, None)
+    start_date, end_date = resolve_training_data_window(
+        db,
+        user_id=current_user.id,
+        days=days,
+        start_date=None,
+        end_date=None,
+        patient_profile_id=patient_profile_id,
+    )
     checkins = list_training_checkins(
         db,
         user_id=current_user.id,
@@ -923,10 +1008,17 @@ def read_training_report_api(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from .progress_reports import build_training_report, normalize_report_dates
+    from .progress_reports import build_training_report
 
     try:
-        period, start_date, end_date = normalize_report_dates(period, start_date, end_date)
+        period, start_date, end_date = resolve_report_data_window(
+            db,
+            user_id=current_user.id,
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+            patient_profile_id=patient_profile_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if patient_profile_id is not None:
@@ -952,13 +1044,20 @@ def export_training_report_api(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from .progress_reports import build_training_report, normalize_report_dates, render_training_report_markdown
+    from .progress_reports import build_training_report, render_training_report_markdown
 
     export_format = format.lower()
     if export_format not in {"md", "txt", "json"}:
         raise HTTPException(status_code=400, detail="format must be one of: md, txt, json")
     try:
-        period, start_date, end_date = normalize_report_dates(period, start_date, end_date)
+        period, start_date, end_date = resolve_report_data_window(
+            db,
+            user_id=current_user.id,
+            period=period,
+            start_date=start_date,
+            end_date=end_date,
+            patient_profile_id=patient_profile_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     if patient_profile_id is not None:
@@ -1980,6 +2079,24 @@ def list_knowledge_articles(
     return KnowledgeArticleListResponse(
         items=build_knowledge_articles(q=q, body_region=body_region, limit=limit)
     )
+
+
+@router.post("/knowledge/articles/generate", response_model=KnowledgeGeneratedArticleResponse)
+def generate_knowledge_article(req: KnowledgeArticleGenerateRequest):
+    from .education import generate_knowledge_article_with_rag
+
+    try:
+        result = generate_knowledge_article_with_rag(
+            article_type=req.article_type,
+            query=req.query,
+            body_region=req.body_region,
+            action_id=req.action_id,
+            pain_regions=req.pain_regions,
+            limit=req.limit or 4,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return KnowledgeGeneratedArticleResponse(**result)
 
 
 @router.get("/knowledge/rag/status")

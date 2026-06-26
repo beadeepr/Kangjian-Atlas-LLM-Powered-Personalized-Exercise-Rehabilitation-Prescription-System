@@ -244,10 +244,45 @@ class KnowledgeArticleResponse(BaseModel):
     content: str
     related_actions: List[dict] = []
     prevention_tips: List[str] = []
+    rag_contexts: Optional[List[dict]] = None
+    generated_by: Optional[str] = None
 
 
 class KnowledgeArticleListResponse(BaseModel):
     items: List[KnowledgeArticleResponse]
+
+
+class KnowledgeArticleSection(BaseModel):
+    heading: str
+    content: str
+
+
+class KnowledgeArticleGenerateRequest(BaseModel):
+    article_type: str = "question"
+    query: Optional[str] = None
+    body_region: Optional[str] = None
+    action_id: Optional[str] = None
+    pain_regions: Optional[List[str]] = None
+    limit: Optional[int] = 4
+
+
+class KnowledgeGeneratedArticleResponse(BaseModel):
+    id: str
+    article_type: str
+    title: str
+    category: str
+    body_regions: List[str] = []
+    summary: str
+    sections: List[KnowledgeArticleSection]
+    content: str
+    related_actions: List[dict] = []
+    prevention_tips: List[str] = []
+    safety_notes: List[str] = []
+    rag_contexts: Optional[List[dict]] = None
+    generated_by: str
+    coverage_status: Optional[str] = None
+    unsupported_regions: List[str] = []
+    coverage_message: Optional[str] = None
 
 
 class KnowledgeQARequest(BaseModel):
@@ -262,6 +297,9 @@ class KnowledgeQAResponse(BaseModel):
     suggested_actions: List[dict]
     safety_notes: List[str]
     rag_contexts: Optional[List[dict]] = None
+    coverage_status: Optional[str] = None
+    unsupported_regions: List[str] = []
+    coverage_message: Optional[str] = None
 
 
 class RAGSearchRequest(BaseModel):

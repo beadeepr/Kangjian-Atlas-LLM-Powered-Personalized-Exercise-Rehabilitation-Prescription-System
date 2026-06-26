@@ -217,6 +217,18 @@ def list_training_checkins(
     return query.order_by(models.TrainingCheckinModel.trained_on.desc(), models.TrainingCheckinModel.id.desc()).all()
 
 
+def get_latest_training_checkin_date(
+    db: Session,
+    user_id: int,
+    patient_profile_id: int | None = None,
+) -> date | None:
+    query = db.query(models.TrainingCheckinModel.trained_on).filter(models.TrainingCheckinModel.user_id == user_id)
+    if patient_profile_id is not None:
+        query = query.filter(models.TrainingCheckinModel.patient_profile_id == patient_profile_id)
+    row = query.order_by(models.TrainingCheckinModel.trained_on.desc()).first()
+    return row[0] if row else None
+
+
 def get_training_checkin(db: Session, checkin_id: int, user_id: int):
     return (
         db.query(models.TrainingCheckinModel)
