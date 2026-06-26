@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 from typing import Any
 
 from .knowledge import REGION_HINTS, load_action_library, select_actions_for_request
@@ -93,6 +94,108 @@ def build_knowledge_articles(
     return articles[: max(1, min(limit, 30))]
 
 
+def _format_rag_contexts(rag_contexts: list[dict[str, Any]]) -> str:
+    if not rag_contexts:
+        return "暂无额外检索上下文。"
+    lines = []
+    for index, item in enumerate(rag_contexts[:5], start=1):
+        metadata = item.get("metadata") or {}
+        title = metadata.get("title") or item.get("id") or f"资料{index}"
+        text = (item.get("text") or "").strip()
+        if text:
+            lines.append(f"[{index}] {title}: {text[:700]}")
+    return "\n".join(lines) or "暂无额外检索上下文。"
+
+
+def _build_knowledge_answer_prompt(
+    question: str,
+    regions: list[str],
+    articles: list[dict[str, Any]],
+    suggested_actions: list[Any],
+    rag_contexts: list[dict[str, Any]],
+    safety_notes: list[str],
+) -> str:
+    action_payload = [_action_payload(action) for action in suggested_actions[:5]]
+    article_payload = [
+        {
+            "title": article.get("title"),
+            "summary": article.get("summary"),
+            "content": article.get("content"),
+            "prevention_tips": article.get("prevention_tips"),
+        }
+        for article in articles[:3]
+    ]
+    return f"""你是中文运动康复科普问答助手。请基于给定资料回答用户问题，要求：
+1. 第一段必须正面回答用户的具体问题，不要只泛泛介绍部位康复原则。
+2. 说明可以做什么、暂时避免什么、如何判断是否需要降级或就医。
+3. 只给科普建议，不替代医生诊断；不要编造资料中没有的动作或医学结论。
+4. 用自然中文输出，控制在 250-450 字，分 3-5 个短段落或要点。
+
+用户问题：
+{question}
+
+关联部位：
+{", ".join(regions) if regions else "未明确"}
+
+本地文章摘要：
+{json.dumps(article_payload, ensure_ascii=False, indent=2)}
+
+可参考动作：
+{json.dumps(action_payload, ensure_ascii=False, indent=2)}
+
+RAG 检索上下文：
+{_format_rag_contexts(rag_contexts)}
+
+必须保留的安全提醒：
+{json.dumps(safety_notes, ensure_ascii=False, indent=2)}
+"""
+
+
+def _fallback_knowledge_answer(
+    regions: list[str],
+    articles: list[dict[str, Any]],
+    suggested_actions: list[Any],
+    rag_contexts: list[dict[str, Any]],
+) -> str:
+    article_text = "；".join(article["summary"] for article in articles[:2])
+    action_text = "、".join(action.name for action in suggested_actions[:3]) or "基础活动度训练"
+    region_text = "、".join(regions) if regions else "相关部位"
+    context_text = ""
+    if rag_contexts:
+        context_text = " 检索到的康复知识提示：" + "；".join(
+            item.get("text", "")[:120] for item in rag_contexts[:2]
+        )
+    return (
+        f"根据本地康复知识库，你的问题主要关联 {region_text}。{article_text}"
+        f"{context_text} 可优先参考 {action_text}，从低强度开始，训练前后记录 VAS 疼痛评分和完成情况。"
+    )
+
+
+def _generate_knowledge_answer(
+    question: str,
+    regions: list[str],
+    articles: list[dict[str, Any]],
+    suggested_actions: list[Any],
+    rag_contexts: list[dict[str, Any]],
+    safety_notes: list[str],
+) -> str:
+    from .doubao import generate_summary
+
+    prompt = _build_knowledge_answer_prompt(
+        question=question,
+        regions=regions,
+        articles=articles,
+        suggested_actions=suggested_actions,
+        rag_contexts=rag_contexts,
+        safety_notes=safety_notes,
+    )
+    result = generate_summary(prompt)
+    answer = (result.get("text") or "").strip() if isinstance(result, dict) else ""
+    if not answer:
+        raise RuntimeError("DeepSeek returned empty answer")
+    return answer
+
+
 def answer_knowledge_question(question: str, pain_regions: list[str] | None = None, limit: int = 4) -> dict[str, Any]:
     if not question or not question.strip():
         raise ValueError("question required")
@@ -114,22 +217,26 @@ def answer_knowledge_question(question: str, pain_regions: list[str] | None = No
         )
     except Exception:
         rag_contexts = []
-    article_text = "；".join(article["summary"] for article in articles[:2])
-    action_text = "、".join(action.name for action in suggested_actions[:3]) or "基础活动度训练"
-    region_text = "、".join(regions) if regions else "相关部位"
-    context_text = ""
-    if rag_contexts:
-        context_text = " 检索到的康复知识提示：" + "；".join(
-            item.get("text", "")[:120] for item in rag_contexts[:2]
-        )
-    answer = (
-        f"根据本地康复知识库，你的问题主要关联 {region_text}。{article_text}"
-        f"{context_text} 可优先参考 {action_text}，从低强度开始，训练前后记录 VAS 疼痛评分和完成情况。"
-    )
     safety_notes = [
         "若出现剧烈疼痛、麻木无力、大小便异常、发热或症状快速加重，请停止训练并及时就医。",
         "科普问答不能替代医生诊断，具体训练强度需结合个人病情调整。",
     ]
+    try:
+        answer = _generate_knowledge_answer(
+            question=question,
+            regions=regions,
+            articles=articles,
+            suggested_actions=suggested_actions,
+            rag_contexts=rag_contexts,
+            safety_notes=safety_notes,
+        )
+    except Exception:
+        answer = _fallback_knowledge_answer(
+            regions=regions,
+            articles=articles,
+            suggested_actions=suggested_actions,
+            rag_contexts=rag_contexts,
+        )
     return {
         "answer": answer,
         "references": articles,

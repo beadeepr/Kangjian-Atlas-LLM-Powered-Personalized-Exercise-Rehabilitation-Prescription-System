@@ -11,7 +11,7 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 load_dotenv(BASE_DIR / ".env")
 load_dotenv(BASE_DIR / "backend" / ".env")
 
-DeepSeek_API_KEY = os.getenv("DeepSeek_API_KEY")
+DeepSeek_API_KEY = os.getenv("DeepSeek_API_KEY") or os.getenv("DEEPSEEK_API_KEY")
 DeepSeek_BASE_URL = os.getenv("DeepSeek_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
 DeepSeek_MODEL_ID = os.getenv("DeepSeek_MODEL_ID")
 
