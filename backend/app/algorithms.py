@@ -105,7 +105,7 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
     required = required_map.get(action_id, list(range(min(17, len(visibility)))))
     missing = []
     for index in required:
-        if index >= len(visibility) or visibility[index] < 0.5:
+        if index >= len(visibility) or visibility[index] < 0.8:
             missing.append(KEYPOINT_NAMES.get(index, f"关键点{index}"))
     if not missing:
         return None
