@@ -1,9 +1,9 @@
 {
-  "generated_at": "2026-06-26T01:35:08.165878+00:00",
+  "generated_at": "2026-06-26T08:04:55.039624+00:00",
   "total": 16,
-  "passed": 14,
-  "failed": 2,
-  "status": "failed",
+  "passed": 16,
+  "failed": 0,
+  "status": "passed",
   "cases": [
     {
       "name": "健康检查",
@@ -37,8 +37,8 @@
     },
     {
       "name": "训练打卡与趋势统计",
-      "status": "failed",
-      "detail": "\nTraceback (most recent call last):\n  File \"D:\\project\\KALPPERPS\\Kangjian-Atlas-LLM-Powered-Personalized-Exercise-Rehabilitation-Prescription-System\\backend\\run_backend_tests.py\", line 46, in record\n    detail = fn() or \"通过\"\n             ~~^^\n  File \"D:\\project\\KALPPERPS\\Kangjian-Atlas-LLM-Powered-Personalized-Exercise-Rehabilitation-Prescription-System\\backend\\run_backend_tests.py\", line 274, in training_flow\n    assert response.json()[\"total_checkins\"] >= 1\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n"
+      "status": "passed",
+      "detail": "通过"
     },
     {
       "name": "实时动作纠正接口",
@@ -67,8 +67,8 @@
     },
     {
       "name": "康复进度报告",
-      "status": "failed",
-      "detail": "\nTraceback (most recent call last):\n  File \"D:\\project\\KALPPERPS\\Kangjian-Atlas-LLM-Powered-Personalized-Exercise-Rehabilitation-Prescription-System\\backend\\run_backend_tests.py\", line 46, in record\n    detail = fn() or \"通过\"\n             ~~^^\n  File \"D:\\project\\KALPPERPS\\Kangjian-Atlas-LLM-Powered-Personalized-Exercise-Rehabilitation-Prescription-System\\backend\\run_backend_tests.py\", line 502, in progress_report_flow\n    assert data[\"total_checkins\"] >= 1\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError\n"
+      "status": "passed",
+      "detail": "通过"
     },
     {
       "name": "知识科普与问答",

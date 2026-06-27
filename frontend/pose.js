@@ -7,10 +7,13 @@ const POSE_CONNECTIONS = [
 ];
 
 export class PoseTracker {
-  constructor({ video, canvas, onFrame }) {
+  constructor({ video, canvas, onFrame, onPoseResult, getActionId, getAuthHeaders }) {
     this.video = video;
     this.canvas = canvas;
     this.onFrame = onFrame;
+    this.onPoseResult = onPoseResult;
+    this.getActionId = getActionId;
+    this.getAuthHeaders = getAuthHeaders;
     this.landmarker = null;
     this.running = false;
     this.lastVideoTime = -1;
@@ -19,31 +22,31 @@ export class PoseTracker {
     this.lastValidVisibility = null;
     this.lastValidVelocities = null;
     this.lastValidTimestamp = 0;
+    this.lastArOverlay = null;
     this.currentCanvasSize = { width: 0, height: 0 };
     this.currentOffscreenSize = { width: 0, height: 0 };
     this._cachedScaleX = 1;
     this._cachedScaleXTs = 0;
-    this.displayKeypoints = null; // currently rendered keypoints (for animation)
+    this.displayKeypoints = null;
     this.displayVisibility = null;
     this._animRequest = null;
     this._animStartTs = 0;
-    this._animDuration = 120; // ms
+    this._animDuration = 120;
     this._renderRequest = null;
     this._lastRenderTs = 0;
-    this._smoothing = 28; // smoothing rate (per second) for follow
-    this._predictionTime = 0.08; // seconds ahead for prediction compensation
+    this._smoothing = 28;
+    this._predictionTime = 0.08;
     this._maxPredictionTime = 0.16;
   }
 
   _startRenderLoop() {
     if (this._renderRequest) return;
     this._lastRenderTs = performance.now();
-    const step = (ts) => {
-      const dt = Math.max(0, ts - this._lastRenderTs);
-      this._lastRenderTs = ts;
+    const step = () => {
+      const dt = Math.max(0, performance.now() - this._lastRenderTs);
+      this._lastRenderTs = performance.now();
 
       if (!this.lastValidKeypoints) {
-        // nothing to show
         this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
         this._renderRequest = requestAnimationFrame(step);
         return;
@@ -51,7 +54,9 @@ export class PoseTracker {
 
       if (!this.displayKeypoints) {
         this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-        this.displayVisibility = this.lastValidVisibility ? this.lastValidVisibility.slice() : this.displayKeypoints.map(()=>1);
+        this.displayVisibility = this.lastValidVisibility
+          ? this.lastValidVisibility.slice()
+          : this.displayKeypoints.map(() => 1);
       } else {
         const predictAhead = Math.min(this._maxPredictionTime, Math.max(this._predictionTime, dt / 1000));
         const predicted = this._predictKeypoints(predictAhead) || this.lastValidKeypoints;
@@ -70,13 +75,12 @@ export class PoseTracker {
           cur.z += (target.z - cur.z) * alpha;
           const sv = this.displayVisibility?.[i] ?? 1;
           const ev = this.lastValidVisibility?.[i] ?? 1;
-          const nv = sv + (ev - sv) * alpha;
           if (!this.displayVisibility) this.displayVisibility = [];
-          this.displayVisibility[i] = nv;
+          this.displayVisibility[i] = sv + (ev - sv) * alpha;
         }
       }
 
-      this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
+      this._drawFrame();
       this._renderRequest = requestAnimationFrame(step);
     };
     this._renderRequest = requestAnimationFrame(step);
@@ -112,9 +116,7 @@ export class PoseTracker {
   }
 
   _predictKeypoints(secondsAhead) {
-    if (!this.lastValidKeypoints) {
-      return null;
-    }
+    if (!this.lastValidKeypoints) return null;
     const time = Math.min(this._maxPredictionTime, secondsAhead);
     if (!this.lastValidVelocities) {
       return this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
@@ -130,7 +132,13 @@ export class PoseTracker {
   }
 
   _estimateVelocities(newKeypoints, oldKeypoints, dtSeconds) {
-    if (!Array.isArray(newKeypoints) || !Array.isArray(oldKeypoints) || newKeypoints.length !== 17 || oldKeypoints.length !== 17 || dtSeconds <= 0) {
+    if (
+      !Array.isArray(newKeypoints) ||
+      !Array.isArray(oldKeypoints) ||
+      newKeypoints.length !== 17 ||
+      oldKeypoints.length !== 17 ||
+      dtSeconds <= 0
+    ) {
       return null;
     }
     return newKeypoints.map((kp, index) => {
@@ -151,7 +159,6 @@ export class PoseTracker {
   }
 
   async init() {
-    // Use backend by default: prepare offscreen canvas for capture
     this.backendMode = true;
     this.offscreen = document.createElement("canvas");
   }
@@ -166,6 +173,73 @@ export class PoseTracker {
     this.canvas.height = height;
     this.currentCanvasSize.width = width;
     this.currentCanvasSize.height = height;
+  }
+
+  _overlayScale(overlay) {
+    const viewport = overlay?.viewport || {};
+    const vpW = viewport.width || this.canvas.width || 1;
+    const vpH = viewport.height || this.canvas.height || 1;
+    return {
+      sx: this.canvas.width / vpW,
+      sy: this.canvas.height / vpH,
+    };
+  }
+
+  drawArOverlay(overlay) {
+    if (!overlay?.items?.length) return false;
+    const { sx, sy } = this._overlayScale(overlay);
+
+    overlay.items.forEach((item) => {
+      if (item.type === "bone_line") {
+        this.ctx.save();
+        this.ctx.globalAlpha = item.opacity ?? 0.72;
+        this.ctx.strokeStyle = item.color || "#22c55e";
+        this.ctx.lineWidth = item.width || 5;
+        this.ctx.lineCap = "round";
+        this.ctx.beginPath();
+        this.ctx.moveTo(item.x1 * sx, item.y1 * sy);
+        this.ctx.lineTo(item.x2 * sx, item.y2 * sy);
+        this.ctx.stroke();
+        this.ctx.restore();
+        return;
+      }
+      if (item.type === "joint_marker") {
+        this.ctx.save();
+        this.ctx.globalAlpha = item.opacity ?? 0.88;
+        this.ctx.fillStyle = item.color || "#38bdf8";
+        this.ctx.beginPath();
+        this.ctx.arc(item.x * sx, item.y * sy, item.radius || 10, 0, Math.PI * 2);
+        this.ctx.fill();
+        this.ctx.restore();
+        return;
+      }
+      if (item.type === "coach_text" && item.text) {
+        this.ctx.save();
+        const x = item.x * sx;
+        const y = item.y * sy;
+        const padding = 10;
+        this.ctx.font = "600 15px system-ui, sans-serif";
+        const metrics = this.ctx.measureText(item.text);
+        const boxW = metrics.width + padding * 2;
+        const boxH = 28;
+        const boxX = x - boxW / 2;
+        const boxY = y;
+        this.ctx.fillStyle = item.background || "rgba(15, 23, 42, 0.72)";
+        if (typeof this.ctx.roundRect === "function") {
+          this.ctx.beginPath();
+          this.ctx.roundRect(boxX, boxY, boxW, boxH, 8);
+          this.ctx.fill();
+        } else {
+          this.ctx.fillRect(boxX, boxY, boxW, boxH);
+        }
+        this.ctx.fillStyle = item.color || "#f8fafc";
+        this.ctx.textAlign = "center";
+        this.ctx.textBaseline = "middle";
+        this.ctx.fillText(item.text, x, boxY + boxH / 2);
+        this.ctx.restore();
+      }
+    });
+    return true;
   }
 
   drawSkeleton(landmarks, visibilities) {
@@ -206,159 +280,161 @@ export class PoseTracker {
     });
   }
 
-  // Animate displayKeypoints -> targetKeypoints over _animDuration ms
-  _animateTo(targetKeypoints, targetVisibility) {
-    if (!Array.isArray(targetKeypoints) || targetKeypoints.length !== 17) return;
-    if (!this.displayKeypoints) {
-      // first-time: jump to target
-      this.displayKeypoints = targetKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-      this.displayVisibility = targetVisibility.slice();
-      this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
+  _drawFrame() {
+    if (this.lastArOverlay && this.drawArOverlay(this.lastArOverlay)) {
       return;
     }
-
-    const startKeypoints = this.displayKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-    const startVis = this.displayVisibility ? this.displayVisibility.slice() : startKeypoints.map(() => 1);
-    const dur = this._animDuration;
-    const startTs = performance.now();
-    if (this._animRequest) cancelAnimationFrame(this._animRequest);
-
-    const step = (ts) => {
-      const t = Math.min(1, (ts - startTs) / dur);
-      const interpolated = [];
-      const interpVis = [];
-      for (let i = 0; i < 17; i++) {
-        const s = startKeypoints[i] || { x: 0.5, y: 0.5, z: 0 };
-        const e = targetKeypoints[i] || { x: s.x, y: s.y, z: s.z };
-        interpolated.push({ x: s.x + (e.x - s.x) * t, y: s.y + (e.y - s.y) * t, z: s.z + (e.z - s.z) * t });
-        const sv = startVis[i] ?? 1;
-        const ev = targetVisibility[i] ?? 1;
-        interpVis.push(sv + (ev - sv) * t);
-      }
-
-      this.displayKeypoints = interpolated;
-      this.displayVisibility = interpVis;
+    if (this.displayKeypoints && this.displayVisibility) {
       this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
+    }
+  }
 
-      if (t < 1) {
-        this._animRequest = requestAnimationFrame(step);
-      } else {
-        this._animRequest = null;
-        this.displayKeypoints = targetKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-        this.displayVisibility = targetVisibility.slice();
-      }
+  _applyKeypoints(rawKeypoints, rawVisibility) {
+    const keypoints = (rawKeypoints || []).map((kp) => ({
+      x: kp[0] ?? kp.x,
+      y: kp[1] ?? kp.y,
+      z: kp[2] ?? kp.z ?? 0,
+    }));
+    const visibility = rawVisibility || keypoints.map(() => 1);
+    if (keypoints.length !== 17 || visibility.length !== 17) return false;
+
+    const nowTs = performance.now() / 1000;
+    if (this.lastValidKeypoints && this.lastValidTimestamp) {
+      const dt = Math.max(0.001, nowTs - this.lastValidTimestamp);
+      const velocities = this._estimateVelocities(keypoints, this.lastValidKeypoints, dt);
+      if (velocities) this.lastValidVelocities = velocities;
+    }
+    this.lastValidTimestamp = nowTs;
+    this.lastValidKeypoints = keypoints;
+    this.lastValidVisibility = visibility;
+    if (!this.displayKeypoints) {
+      this.displayKeypoints = keypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+      this.displayVisibility = visibility.slice();
+    }
+    return true;
+  }
+
+  _canUseInferFrame() {
+    const actionId = this.getActionId?.();
+    const headers = this.getAuthHeaders?.() || {};
+    return Boolean(actionId && headers.Authorization);
+  }
+
+  async _postInferFrame(dataUrl, offWidth, offHeight, mirrored) {
+    const apiBase = window.APP_CONFIG?.API_BASE || "";
+    const headers = {
+      "Content-Type": "application/json",
+      ...(this.getAuthHeaders?.() || {}),
     };
+    const response = await fetch(`${apiBase}/pose/infer_frame`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        action_id: this.getActionId(),
+        image_base64: dataUrl,
+        viewport_width: offWidth,
+        viewport_height: offHeight,
+        mirror: mirrored,
+      }),
+    });
+    if (!response.ok) return null;
+    return response.json();
+  }
 
-    this._animRequest = requestAnimationFrame(step);
+  async _postInferPose(dataUrl) {
+    const apiBase = window.APP_CONFIG?.API_BASE || "";
+    const response = await fetch(`${apiBase}/infer_pose`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ image_base64: dataUrl }),
+    });
+    if (!response.ok) return null;
+    return response.json();
+  }
+
+  _emitPoseResult(json, rawKeypoints, rawVisibility) {
+    if (this.onPoseResult) {
+      this.onPoseResult({
+        keypoints: rawKeypoints,
+        visibility: rawVisibility,
+        feedback: json.feedback,
+        score: json.score,
+        status: json.status,
+        voice_cue: json.voice_cue,
+        ar_overlay: json.ar_overlay,
+        skeleton_3d: json.skeleton_3d,
+      });
+      return;
+    }
+    this.onFrame?.({ keypoints: rawKeypoints, visibility: rawVisibility });
   }
 
   start() {
     this.running = true;
     this._startRenderLoop();
-    if (this.backendMode) {
-      // Backend loop: capture frames and POST to /infer_pose
-      const sendInterval = (window.APP_CONFIG && window.APP_CONFIG.POSE_SEND_INTERVAL_MS) || 100;
-      const loopBackend = async () => {
-        if (!this.running) return;
-        try {
-          if (this.video.readyState >= 2) {
-            this.resizeCanvas();
-            // draw video to offscreen canvas
-            const offWidth = this.video.videoWidth || 640;
-            const offHeight = this.video.videoHeight || 480;
-            if (
-              this.currentOffscreenSize.width !== offWidth ||
-              this.currentOffscreenSize.height !== offHeight
-            ) {
-              this.offscreen.width = offWidth;
-              this.offscreen.height = offHeight;
-              this.currentOffscreenSize.width = offWidth;
-              this.currentOffscreenSize.height = offHeight;
+    if (!this.backendMode) return;
+
+    const sendInterval = (window.APP_CONFIG && window.APP_CONFIG.POSE_SEND_INTERVAL_MS) || 100;
+    const loopBackend = async () => {
+      if (!this.running) return;
+      try {
+        if (this.video.readyState >= 2) {
+          this.resizeCanvas();
+          const offWidth = this.video.videoWidth || 640;
+          const offHeight = this.video.videoHeight || 480;
+          if (
+            this.currentOffscreenSize.width !== offWidth ||
+            this.currentOffscreenSize.height !== offHeight
+          ) {
+            this.offscreen.width = offWidth;
+            this.offscreen.height = offHeight;
+            this.currentOffscreenSize.width = offWidth;
+            this.currentOffscreenSize.height = offHeight;
+          }
+          const offCtx = this.offscreen.getContext("2d");
+          offCtx.drawImage(this.video, 0, 0, this.offscreen.width, this.offscreen.height);
+          const dataUrl = this.offscreen.toDataURL("image/jpeg", 0.7);
+          const mirrored = this._getVideoScaleX() < 0;
+
+          try {
+            let json = null;
+            if (this._canUseInferFrame()) {
+              json = await this._postInferFrame(dataUrl, offWidth, offHeight, mirrored);
             }
-            const offCtx = this.offscreen.getContext("2d");
-            offCtx.drawImage(this.video, 0, 0, this.offscreen.width, this.offscreen.height);
-            const dataUrl = this.offscreen.toDataURL("image/jpeg", 0.7);
-            // call backend
-            try {
-              const res = await fetch(`${window.APP_CONFIG.API_BASE}/infer_pose`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ image_base64: dataUrl }),
-              });
-              if (res.ok) {
-                const json = await res.json();
-                const keypoints = (json.keypoints || []).map((kp) => ({ x: kp[0], y: kp[1], z: kp[2] || 0 }));
-                const visibility = json.visibility || keypoints.map(() => 1);
-                if (keypoints.length === 17 && visibility.length === 17) {
-                  const nowTs = performance.now() / 1000;
-                  if (this.lastValidKeypoints && this.lastValidTimestamp) {
-                    const dt = Math.max(0.001, nowTs - this.lastValidTimestamp);
-                    const velocities = this._estimateVelocities(keypoints, this.lastValidKeypoints, dt);
-                    if (velocities) {
-                      this.lastValidVelocities = velocities;
-                    }
-                  }
-                  this.lastValidTimestamp = performance.now() / 1000;
-                  this.lastValidKeypoints = keypoints;
-                  this.lastValidVisibility = visibility;
-                  // ensure display initialized; render loop will smooth toward lastValid
-                  if (!this.displayKeypoints) {
-                    this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-                    this.displayVisibility = this.lastValidVisibility.slice();
-                  }
-                  this.onFrame?.({ keypoints: json.keypoints, visibility });
-                } else {
-                  if (json.keypoints?.length || json.visibility?.length) {
-                    console.warn("infer_pose returned incomplete pose data", {
-                      keypoints: json.keypoints?.length,
-                      visibility: json.visibility?.length,
-                    });
-                  }
-                  if (this.displayKeypoints && this.displayVisibility) {
-                    // keep showing interpolated display
-                    this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
-                  } else if (this.lastValidKeypoints && this.lastValidVisibility) {
-                    // fallback to last valid pose instantly
-                    this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-                    this.displayVisibility = this.lastValidVisibility.slice();
-                    this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
-                  }
-                }
-              } else {
-                if (this.displayKeypoints && this.displayVisibility) {
-                  this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
-                } else if (this.lastValidKeypoints && this.lastValidVisibility) {
-                  this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-                  this.displayVisibility = this.lastValidVisibility.slice();
-                  this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
-                } else {
-                  this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-                }
-              }
-            } catch (err) {
-              // network or parse error: keep current display if present
-              if (this.displayKeypoints && this.displayVisibility) {
-                this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
-              } else if (this.lastValidKeypoints && this.lastValidVisibility) {
-                this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-                this.displayVisibility = this.lastValidVisibility.slice();
-                this.drawSkeleton(this.displayKeypoints, this.displayVisibility);
-              }
+            if (!json) {
+              json = await this._postInferPose(dataUrl);
+              if (json) this.lastArOverlay = null;
+            } else {
+              this.lastArOverlay = json.ar_overlay || null;
+            }
+
+            if (json && this._applyKeypoints(json.keypoints, json.visibility)) {
+              this._emitPoseResult(json, json.keypoints, json.visibility);
+            } else if (this.displayKeypoints && this.displayVisibility) {
+              this._drawFrame();
+            } else if (this.lastValidKeypoints && this.lastValidVisibility) {
+              this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+              this.displayVisibility = this.lastValidVisibility.slice();
+              this._drawFrame();
+            }
+          } catch (err) {
+            if (this.displayKeypoints && this.displayVisibility) {
+              this._drawFrame();
             }
           }
-        } finally {
-          setTimeout(loopBackend, sendInterval);
         }
-      };
-      loopBackend();
-      return;
-    }
+      } finally {
+        setTimeout(loopBackend, sendInterval);
+      }
+    };
+    loopBackend();
   }
 
   stop() {
     this.running = false;
     this._stopRenderLoop();
     if (this._animRequest) cancelAnimationFrame(this._animRequest);
+    this.lastArOverlay = null;
     this.ctx?.clearRect(0, 0, this.canvas.width, this.canvas.height);
   }
 }
