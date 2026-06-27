@@ -17,6 +17,28 @@ export function formatShortDate(value) {
   return String(value).slice(0, 19).replace("T", " ");
 }
 
+/** Local calendar date as YYYY-MM-DD (for training check-in payloads). */
+export function todayIsoDate(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+export function formatVasAxisLabel(dateValue, { showYear = false } = {}) {
+  if (!dateValue) return "";
+  const raw = String(dateValue).slice(0, 10);
+  if (showYear) return raw;
+  return raw.slice(5);
+}
+
+export function vasChartLabelStep(pointCount) {
+  if (pointCount <= 7) return 1;
+  if (pointCount <= 14) return 2;
+  if (pointCount <= 21) return 3;
+  return 5;
+}
+
 // Debounce a function by `wait` ms. Returns a cancelable wrapper.
 export function debounce(fn, wait = 300) {
   let timer = null;

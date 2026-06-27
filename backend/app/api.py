@@ -1713,7 +1713,21 @@ def create_doctor_link(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
+    from sqlalchemy.orm import joinedload
+
     from .collaboration import is_doctor, link_response
+
+    def load_link(link_id: int):
+        return (
+            db.query(models.DoctorPatientLinkModel)
+            .options(
+                joinedload(models.DoctorPatientLinkModel.user),
+                joinedload(models.DoctorPatientLinkModel.patient_profile),
+                joinedload(models.DoctorPatientLinkModel.doctor),
+            )
+            .filter(models.DoctorPatientLinkModel.id == link_id)
+            .first()
+        )
 
     doctor = get_user_by_account(db, req.doctor_account.strip())
     if not doctor or not is_doctor(doctor):
@@ -1734,7 +1748,7 @@ def create_doctor_link(
         existing.patient_note = req.patient_note
         db.commit()
         db.refresh(existing)
-        return DoctorPatientLinkResponse(**link_response(existing))
+        return DoctorPatientLinkResponse(**link_response(load_link(existing.id) or existing))
     link = models.DoctorPatientLinkModel(
         user_id=current_user.id,
         doctor_id=doctor.id,
@@ -1745,7 +1759,62 @@ def create_doctor_link(
     db.add(link)
     db.commit()
     db.refresh(link)
-    return DoctorPatientLinkResponse(**link_response(link))
+    return DoctorPatientLinkResponse(**link_response(load_link(link.id) or link))
+
+
+@router.get("/doctor_links", response_model=list[DoctorPatientLinkResponse])
+def list_my_doctor_links(
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from sqlalchemy.orm import joinedload
+
+    from .collaboration import link_response
+
+    links = (
+        db.query(models.DoctorPatientLinkModel)
+        .options(
+            joinedload(models.DoctorPatientLinkModel.user),
+            joinedload(models.DoctorPatientLinkModel.patient_profile),
+            joinedload(models.DoctorPatientLinkModel.doctor),
+        )
+        .filter(
+            models.DoctorPatientLinkModel.user_id == current_user.id,
+            models.DoctorPatientLinkModel.status == "active",
+        )
+        .order_by(models.DoctorPatientLinkModel.updated_at.desc())
+        .all()
+    )
+    return [DoctorPatientLinkResponse(**link_response(link)) for link in links]
+
+
+@router.delete("/doctor_links/{link_id}", response_model=DoctorPatientLinkResponse)
+def revoke_doctor_link_api(
+    link_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    from sqlalchemy.orm import joinedload
+
+    from .collaboration import link_response, revoke_doctor_link
+
+    try:
+        link = revoke_doctor_link(db, link_id, current_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    loaded = (
+        db.query(models.DoctorPatientLinkModel)
+        .options(
+            joinedload(models.DoctorPatientLinkModel.user),
+            joinedload(models.DoctorPatientLinkModel.patient_profile),
+            joinedload(models.DoctorPatientLinkModel.doctor),
+        )
+        .filter(models.DoctorPatientLinkModel.id == link.id)
+        .first()
+    )
+    return DoctorPatientLinkResponse(**link_response(loaded or link))
 
 
 @router.get("/doctor/patients", response_model=list[DoctorPatientLinkResponse])
@@ -1753,10 +1822,17 @@ def doctor_list_patients(
     db: Session = Depends(get_db),
     current_user=Depends(get_doctor_user),
 ):
+    from sqlalchemy.orm import joinedload
+
     from .collaboration import link_response
 
     links = (
         db.query(models.DoctorPatientLinkModel)
+        .options(
+            joinedload(models.DoctorPatientLinkModel.user),
+            joinedload(models.DoctorPatientLinkModel.patient_profile),
+            joinedload(models.DoctorPatientLinkModel.doctor),
+        )
         .filter(
             models.DoctorPatientLinkModel.doctor_id == current_user.id,
             models.DoctorPatientLinkModel.status == "active",
@@ -1816,9 +1892,18 @@ def doctor_list_reviews(
     db: Session = Depends(get_db),
     current_user=Depends(get_doctor_user),
 ):
+    from sqlalchemy.orm import joinedload
+
     from .collaboration import review_response
 
-    query = db.query(models.PrescriptionReviewModel).filter(models.PrescriptionReviewModel.doctor_id == current_user.id)
+    query = (
+        db.query(models.PrescriptionReviewModel)
+        .options(
+            joinedload(models.PrescriptionReviewModel.prescription).joinedload(models.PrescriptionModel.user),
+            joinedload(models.PrescriptionReviewModel.prescription).joinedload(models.PrescriptionModel.patient_profile),
+        )
+        .filter(models.PrescriptionReviewModel.doctor_id == current_user.id)
+    )
     if status:
         query = query.filter(models.PrescriptionReviewModel.status == status)
     reviews = query.order_by(models.PrescriptionReviewModel.updated_at.desc()).all()

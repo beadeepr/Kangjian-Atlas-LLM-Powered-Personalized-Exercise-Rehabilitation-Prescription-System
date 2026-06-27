@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>康健图谱 - 个性化运动康复处方</title>
-    <link rel="stylesheet" href="style.css?v=20260626f" />
+    <link rel="stylesheet" href="style.css?v=20260627k" />
   </head>
   <body>
     <header class="app-header">
@@ -31,6 +31,8 @@
           <button class="btn btn-secondary btn-small" id="go-library" type="button" hidden>动作库</button>
           <button class="btn btn-secondary btn-small" id="go-progress" type="button" hidden>康复进度</button>
           <button class="btn btn-secondary btn-small" id="go-knowledge" type="button" hidden>知识科普</button>
+          <button class="btn btn-secondary btn-small" id="go-collaboration" type="button" hidden>医患协同</button>
+          <button class="btn btn-secondary btn-small" id="go-doctor" type="button" hidden>医生工作台</button>
           <button class="btn btn-secondary btn-small" id="go-admin" type="button" hidden>管理后台</button>
         </div>
         <button class="btn btn-secondary btn-small header-secondary-toggle" id="header-secondary-toggle" type="button" hidden aria-expanded="false" aria-controls="header-secondary-group">更多 ▾</button>
@@ -78,7 +80,7 @@
 
           <div id="auth-login-wrap" class="card login-card auth-panel-wrap">
             <h3 class="auth-panel-title">账号登录</h3>
-            <form id="auth-login-form" novalidate>
+            <form id="auth-login-form" novalidate action="#" method="post">
               <div class="field">
                 <label for="auth-account">账号 <span class="required">*</span></label>
                 <input id="auth-account" name="account" type="text" placeholder="例如：zhangsan" autocomplete="username" required />
@@ -97,7 +99,7 @@
 
           <div id="auth-register-wrap" class="card login-card auth-panel-wrap" hidden>
             <h3 class="auth-panel-title">注册账号</h3>
-            <form id="auth-register-form" novalidate>
+            <form id="auth-register-form" novalidate action="#" method="post">
               <div class="field">
                 <label for="auth-register-account">账号 <span class="required">*</span></label>
                 <input id="auth-register-account" name="account" type="text" placeholder="例如：zhangsan" autocomplete="username" required />
@@ -264,6 +266,8 @@
 
         <div id="action-list" class="action-grid"></div>
 
+        <div class="card prescription-collaboration-card" id="prescription-collaboration-card" hidden></div>
+
         <div class="card prescription-feedback-card" id="prescription-feedback-card" hidden>
           <h3>处方满意度反馈</h3>
           <p class="hint">您的评价将帮助我们持续改进康复处方质量。</p>
@@ -393,14 +397,50 @@
           <div id="progress-completion"><p class="hint">暂无数据</p></div>
         </div>
         <div class="card progress-section">
-          <h3>AI 康复周报</h3>
+          <div class="progress-section-head">
+            <h3>AI 康复报告</h3>
+            <div class="report-period-toggle" role="group" aria-label="报告周期">
+              <button class="btn btn-secondary btn-small report-period-btn active" type="button" data-report-period="weekly">周报</button>
+              <button class="btn btn-secondary btn-small report-period-btn" type="button" data-report-period="monthly">月报</button>
+            </div>
+          </div>
           <div id="progress-report"><p class="hint">暂无数据</p></div>
           <div class="progress-report-actions" id="progress-report-actions" hidden>
-            <button class="btn btn-secondary btn-small" id="export-report-md" type="button">导出周报 MD</button>
+            <button class="btn btn-secondary btn-small" id="export-report-md" type="button">导出报告 MD</button>
           </div>
+        </div>
+        <div class="card progress-section">
+          <div class="progress-section-head">
+            <h3>处方调整建议</h3>
+            <button class="btn btn-secondary btn-small" id="request-auto-adjustment" type="button">生成系统调整建议</button>
+          </div>
+          <p class="hint">基于近 14 天训练打卡与疼痛趋势，系统或医生可提出处方调整；采纳后将生成新处方。</p>
+          <div id="progress-adjustments"><p class="hint">暂无待处理建议</p></div>
         </div>
         <div class="page-actions">
           <button class="btn btn-secondary" id="back-from-progress" type="button">返回历史</button>
+        </div>
+      </section>
+
+      <section id="page-collaboration" class="page" aria-labelledby="collaboration-title">
+        <div class="page-head">
+          <h2 id="collaboration-title">医患协同</h2>
+          <p>绑定或解绑医生，便于提交处方审核与接收调整建议。</p>
+        </div>
+        <div id="collaboration-panel" class="collaboration-panel"><p class="hint">正在加载…</p></div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-from-collaboration" type="button">返回处方</button>
+        </div>
+      </section>
+
+      <section id="page-doctor" class="page" aria-labelledby="doctor-title">
+        <div class="page-head">
+          <h2 id="doctor-title">医生工作台</h2>
+          <p>查看绑定患者、审核处方并提交调整建议。</p>
+        </div>
+        <div id="doctor-workspace" class="doctor-workspace"><p class="hint">正在加载…</p></div>
+        <div class="page-actions">
+          <button class="btn btn-secondary" id="back-from-doctor" type="button">返回问诊</button>
         </div>
       </section>
 
@@ -643,8 +683,8 @@
       <button class="toast-close" id="toast-close" type="button" aria-label="关闭通知">×</button>
     </div>
 
-    <script src="config.js?v=20260626f"></script>
-    <script src="mock.js?v=20260626f"></script>
-    <script type="module" src="app.js?v=20260626f"></script>
+    <script src="config.js?v=20260627k"></script>
+    <script src="mock.js?v=20260627k"></script>
+    <script type="module" src="app.js?v=20260627k"></script>
   </body>
 </html>

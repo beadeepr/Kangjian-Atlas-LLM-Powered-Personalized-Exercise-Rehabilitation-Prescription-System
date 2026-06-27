@@ -3,6 +3,9 @@ import {
   escapeHtml,
   escapeAdminText,
   formatShortDate,
+  todayIsoDate,
+  formatVasAxisLabel,
+  vasChartLabelStep,
   debounce,
   renderDemoNotice,
   renderLoadError,
@@ -16,6 +19,7 @@ import { state, registerStepLoader, setStepNavEl, makeGoToStep } from "./shared/
 import { createKnowledgePage } from "./pages/knowledge.js";
 import { createAdminPage } from "./pages/admin.js";
 import { createProfilesPage } from "./pages/profiles.js";
+import { createCollaborationPage } from "./pages/collaboration.js";
 
 // Debounced filter reloads (replaces the previous window.*Timer globals).
 // knowledgeFilterDebounced is declared alongside the knowledge page module below.
@@ -118,6 +122,12 @@ const els = {
   knowledgePainRegions: document.getElementById("knowledge-pain-regions"),
   prescriptionFeedbackCard: document.getElementById("prescription-feedback-card"),
   prescriptionFeedbackForm: document.getElementById("prescription-feedback-form"),
+  prescriptionCollaborationCard: document.getElementById("prescription-collaboration-card"),
+  progressAdjustments: document.getElementById("progress-adjustments"),
+  collaborationEntryButton: document.getElementById("go-collaboration"),
+  collaborationPanel: document.getElementById("collaboration-panel"),
+  doctorEntryButton: document.getElementById("go-doctor"),
+  doctorWorkspace: document.getElementById("doctor-workspace"),
 };
 
 const AUTH_TOKEN_KEY = "kj_auth_token";
@@ -322,7 +332,8 @@ async function submitAuth(mode) {
       }
       const loginData = await loginResponse.json();
       saveAuth({ token: loginData.token, user: loginData.user });
-      showToast(`欢迎你，${loginData.user.nickname}`);
+      clearPrescriptionSession();
+      showToast(`欢迎你，${resolveDisplayName(loginData.user)}`);
       loadPatientProfiles();
       updateAdminEntry();
       goToStep("intake");
@@ -331,7 +342,8 @@ async function submitAuth(mode) {
 
     const data = await response.json();
     saveAuth({ token: data.token, user: data.user });
-    showToast(`欢迎你，${data.user.nickname}`);
+    clearPrescriptionSession();
+    showToast(`欢迎你，${resolveDisplayName(data.user)}`);
     loadPatientProfiles();
     updateAdminEntry();
     goToStep("intake");
@@ -359,6 +371,10 @@ function logoutSession() {
   updateUserIdentity();
   if (els.prescriptionHistory) {
     els.prescriptionHistory.textContent = "请先登录后再查看历史处方。";
+  }
+  if (els.trainingStatsPanel) {
+    els.trainingStatsPanel.hidden = true;
+    els.trainingStatsPanel.innerHTML = "";
   }
   goToStep("login");
   showToast("已退出登录");
@@ -457,31 +473,45 @@ const goToStep = makeGoToStep({
   onNavigate: () => setHeaderSecondaryOpen(false),
 });
 
+function sessionKey(base) {
+  const userId = state.auth?.user?.id;
+  return userId ? `${base}_${userId}` : base;
+}
+
 function savePrescriptionToSession(prescription, formData) {
   try {
-    sessionStorage.setItem("kj_prescription", JSON.stringify(prescription));
-    if (formData) sessionStorage.setItem("kj_form_data", JSON.stringify(formData));
+    sessionStorage.setItem(sessionKey("kj_prescription"), JSON.stringify(prescription));
+    if (formData) sessionStorage.setItem(sessionKey("kj_form_data"), JSON.stringify(formData));
+    sessionStorage.setItem(sessionKey("kj_current_step"), state.currentStep || "prescription");
   } catch { /* quota exceeded or private mode */ }
 }
 
 function loadPrescriptionFromSession() {
   try {
-    const raw = sessionStorage.getItem("kj_prescription");
+    const raw = sessionStorage.getItem(sessionKey("kj_prescription"));
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
 function loadFormDataFromSession() {
   try {
-    const raw = sessionStorage.getItem("kj_form_data");
+    const raw = sessionStorage.getItem(sessionKey("kj_form_data"));
     return raw ? JSON.parse(raw) : null;
   } catch { return null; }
 }
 
 function clearPrescriptionSession() {
-  sessionStorage.removeItem("kj_prescription");
-  sessionStorage.removeItem("kj_form_data");
-  sessionStorage.removeItem("kj_current_step");
+  sessionStorage.removeItem(sessionKey("kj_prescription"));
+  sessionStorage.removeItem(sessionKey("kj_form_data"));
+  sessionStorage.removeItem(sessionKey("kj_current_step"));
+  state.prescription = null;
+}
+
+function resolveDisplayName(user) {
+  if (!user) return "未登录";
+  const nickname = String(user.name || user.nickname || "").trim();
+  if (nickname && !/^[\?？]+$/.test(nickname)) return nickname;
+  return user.account || "用户";
 }
 
 function getMobilityTier(score) {
@@ -791,6 +821,13 @@ function updateAdminEntry() {
   if (els.knowledgeEntryButton) {
     els.knowledgeEntryButton.hidden = !loggedIn;
   }
+  const isDoctor = state.currentUser?.role === "doctor" || state.currentUser?.role === "admin";
+  if (els.collaborationEntryButton) {
+    els.collaborationEntryButton.hidden = !loggedIn || isDoctor || window.APP_CONFIG.DEMO_MODE;
+  }
+  if (els.doctorEntryButton) {
+    els.doctorEntryButton.hidden = !loggedIn || !isDoctor || window.APP_CONFIG.DEMO_MODE;
+  }
   if (els.imagingSectionWrap) {
     els.imagingSectionWrap.hidden = window.APP_CONFIG.DEMO_MODE;
   }
@@ -803,6 +840,8 @@ function updateAdminEntry() {
       !els.libraryEntryButton?.hidden ||
       !els.goProgressButton?.hidden ||
       !els.knowledgeEntryButton?.hidden ||
+      !els.collaborationEntryButton?.hidden ||
+      !els.doctorEntryButton?.hidden ||
       !els.adminEntryButton?.hidden
     );
     secondaryToggle.hidden = !anySecondaryVisible;
@@ -1315,9 +1354,10 @@ async function loadProgressPage() {
     if (els.progressVasChart) els.progressVasChart.innerHTML = "";
     if (els.progressCompletion) els.progressCompletion.innerHTML = "";
     if (els.progressReport) els.progressReport.innerHTML = "";
+    if (els.progressAdjustments) els.progressAdjustments.innerHTML = "";
     return;
   }
-  await Promise.all([loadProgressStats(), loadProgressReport()]);
+  await Promise.all([loadProgressStats(), loadProgressReport(), collaborationPage.loadAdjustments()]);
 }
 
 async function loadProgressStats() {
@@ -1339,18 +1379,22 @@ async function loadProgressStats() {
     `;
     if (vasChart && trend.length) {
       const maxPain = 10;
-      const barW = Math.max(20, Math.min(60, Math.floor(600 / trend.length)));
+      const labelStep = vasChartLabelStep(trend.length);
+      const barW = Math.max(32, Math.min(56, Math.floor(720 / trend.length)));
       vasChart.innerHTML = `
         <div class="vas-chart">
-          ${trend.map(p => {
+          ${trend.map((p, index) => {
             const before = p.avg_pain_before ?? 0;
             const after = p.avg_pain_after ?? 0;
-            return `<div class="vas-bar-group" style="width:${barW}px">
+            const showLabel = index % labelStep === 0 || index === trend.length - 1;
+            const dateLabel = showLabel ? formatVasAxisLabel(p.date) : "";
+            const dateTitle = p.date ? `${p.date} · 训练前 ${before.toFixed(1)} / 训练后 ${after.toFixed(1)}` : "";
+            return `<div class="vas-bar-group" style="min-width:${barW}px" title="${escapeHtml(dateTitle)}">
               <div class="vas-bars">
                 <div class="vas-bar vas-before" style="height:${(before / maxPain) * 100}%" title="训练前:${before.toFixed(1)}"></div>
                 <div class="vas-bar vas-after" style="height:${(after / maxPain) * 100}%" title="训练后:${after.toFixed(1)}"></div>
               </div>
-              <span class="vas-date">${p.date?.slice(5) || ""}</span>
+              <span class="vas-date${showLabel ? "" : " vas-date-spacer"}" aria-hidden="${showLabel ? "false" : "true"}">${escapeHtml(dateLabel)}</span>
             </div>`;
           }).join("")}
         </div>
@@ -1377,9 +1421,14 @@ async function loadProgressReport() {
   const reportEl = els.progressReport;
   const actionsEl = els.progressReportActions;
   if (!reportEl) return;
-  reportEl.innerHTML = '<p class="hint">正在生成周报…</p>';
+  const period = state.progressReportPeriod || "weekly";
+  const periodLabel = period === "monthly" ? "月报" : "周报";
+  reportEl.innerHTML = `<p class="hint">正在生成${periodLabel}…</p>`;
   try {
-    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/report?period=week`, { headers: authHeaders() });
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/training_checkins/report?period=${period}`,
+      { headers: authHeaders() }
+    );
     if (!response.ok) throw new Error();
     const r = await response.json();
     reportEl.innerHTML = `
@@ -1394,22 +1443,30 @@ async function loadProgressReport() {
     `;
     if (actionsEl) actionsEl.hidden = false;
   } catch {
-    reportEl.innerHTML = '<p class="hint">周报生成失败，请确认有训练打卡记录。</p>';
+    reportEl.innerHTML = `<p class="hint">${periodLabel}生成失败，请确认有训练打卡记录。</p>`;
   }
 }
 
 async function exportProgressReport() {
+  const period = state.progressReportPeriod || "weekly";
   try {
-    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/report/export?period=week&format=markdown`, { headers: authHeaders() });
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/training_checkins/report/export?period=${period}&format=markdown`,
+      { headers: authHeaders() }
+    );
     if (!response.ok) throw new Error();
     const text = await response.text();
     const blob = new Blob([text], { type: "text/markdown" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    a.href = url; a.download = "康复周报.md"; a.click();
+    a.href = url;
+    a.download = period === "monthly" ? "康复月报.md" : "康复周报.md";
+    a.click();
     URL.revokeObjectURL(url);
-    showToast("周报已导出");
-  } catch { showErrorToast("周报导出失败"); }
+    showToast("报告已导出");
+  } catch {
+    showErrorToast("报告导出失败");
+  }
 }
 
 // ── M7: Knowledge education page ──
@@ -1460,6 +1517,25 @@ const adminPage = createAdminPage({
 const loadAdminActions = adminPage.loadAdminActions;
 const bindAdminPanelEvents = adminPage.bindAdminPanelEvents;
 const bindAdminQuickNavEvents = adminPage.bindAdminQuickNavEvents;
+
+const collaborationPage = createCollaborationPage({
+  state,
+  els,
+  apiGet,
+  apiSend,
+  escapeHtml,
+  formatShortDate,
+  showToast,
+  showErrorToast,
+  showWarnToast,
+  renderDemoNotice,
+  renderLoadError,
+  requireApi,
+});
+const loadAdjustments = collaborationPage.loadAdjustments;
+const loadCollaborationPage = collaborationPage.loadCollaborationPage;
+const loadDoctorWorkspace = collaborationPage.loadDoctorWorkspace;
+const renderPrescriptionCollaboration = collaborationPage.renderPrescriptionCollaboration;
 
 // ── Patient profiles + imaging reports page ──
 // Extracted to pages/profiles.js. Owns profile CRUD, imaging upload/list,
@@ -1622,8 +1698,10 @@ async function loadTrainingStats() {
     const data = await response.json();
     const trend = data.trend?.points || [];
     const recent = trend.slice(-7);
+    const accountLabel = state.currentUser?.account || "当前账号";
     els.trainingStatsPanel.innerHTML = `
       <h3>训练统计（近 30 天）</h3>
+      <p class="hint">以下数据仅统计账号 <strong>${escapeHtml(accountLabel)}</strong> 的训练打卡。</p>
       <div class="stats-grid">
         <div class="stat-card"><span class="stat-value">${data.total_checkins}</span><span class="stat-label">打卡次数</span></div>
         <div class="stat-card"><span class="stat-value">${data.active_days}</span><span class="stat-label">活跃天数</span></div>
@@ -1667,12 +1745,13 @@ function updateUserIdentity() {
   }
 
   els.userIdentity.hidden = false;
-  els.userDisplayName.textContent = state.currentUser.name;
-  els.userAvatar.textContent = state.currentUser.name.slice(0, 1);
-  els.historyUserName.textContent = `当前用户：${state.currentUser.name}`;
+  const displayName = resolveDisplayName(state.currentUser);
+  els.userDisplayName.textContent = displayName;
+  els.userAvatar.textContent = displayName.slice(0, 1);
+  els.historyUserName.textContent = `当前用户：${displayName}`;
   els.historyUserMeta.textContent = state.currentUser.age
-    ? `年龄：${state.currentUser.age} 岁`
-    : "年龄未填写";
+    ? `年龄：${state.currentUser.age} 岁 · 账号：${state.currentUser.account}`
+    : `账号：${state.currentUser.account}`;
 }
 
 function renderHistoryCard(prescription) {
@@ -1731,6 +1810,11 @@ async function loadPrescriptionHistory() {
     if (!Array.isArray(data) || data.length === 0) {
       els.prescriptionHistory.textContent = "暂无处方记录。";
       return;
+    }
+    if (els.historyUserMeta && state.currentUser?.account) {
+      els.historyUserMeta.textContent = `${
+        state.currentUser.age ? `年龄：${state.currentUser.age} 岁 · ` : ""
+      }账号：${state.currentUser.account} · 共 ${data.length} 条处方`;
     }
     els.prescriptionHistory.innerHTML = data.map(renderHistoryCard).join("");
     els.prescriptionHistory.querySelectorAll(".history-export-md").forEach((button) => {
@@ -1910,6 +1994,7 @@ function renderPrescription(prescription) {
 
   updatePrescriptionExportBar();
   updatePrescriptionFeedbackCard();
+  renderPrescriptionCollaboration();
 
   els.actionList.querySelectorAll(".view-demo").forEach((button) => {
     button.addEventListener("click", () => {
@@ -2028,6 +2113,19 @@ function getPoseMissingVisibilityFeedback(actionId, visibility) {
   };
 }
 
+function handlePoseResult(result) {
+  if (Array.isArray(result?.feedback) && (result.score !== undefined || result.status)) {
+    updatePoseFeedback({
+      feedback: result.feedback,
+      score: result.score ?? 0,
+      status: result.status || "warning",
+      voice_cue: result.voice_cue || null,
+    });
+    return;
+  }
+  queuePosePayload(result);
+}
+
 function queuePosePayload(frame) {
   if (!state.currentAction?.id || !state.autoPoseEnabled) return;
 
@@ -2117,6 +2215,9 @@ async function ensurePoseTracker() {
       video: els.video,
       canvas: els.overlay,
       onFrame: queuePosePayload,
+      onPoseResult: handlePoseResult,
+      getActionId: () => getPoseActionId(state.currentAction),
+      getAuthHeaders: () => authHeaders(),
     });
     await state.poseTracker.init();
   }
@@ -2533,6 +2634,22 @@ function bindEvents() {
   });
 
   els.goProgressButton?.addEventListener("click", () => goToStep("progress"));
+  els.collaborationEntryButton?.addEventListener("click", () => goToStep("collaboration"));
+  document.getElementById("back-from-collaboration")?.addEventListener("click", () => goToStep("prescription"));
+  els.doctorEntryButton?.addEventListener("click", () => goToStep("doctor"));
+  document.getElementById("back-from-doctor")?.addEventListener("click", () => goToStep("intake"));
+  document.querySelectorAll(".report-period-btn").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const period = button.dataset.reportPeriod;
+      if (!period || state.progressReportPeriod === period) return;
+      state.progressReportPeriod = period;
+      document.querySelectorAll(".report-period-btn").forEach((item) => {
+        item.classList.toggle("active", item.dataset.reportPeriod === period);
+      });
+      await loadProgressReport();
+    });
+  });
+  collaborationPage.bindCollaborationEvents();
   els.knowledgeEntryButton?.addEventListener("click", () => goToStep("knowledge"));
   document.getElementById("back-from-knowledge")?.addEventListener("click", () => goToStep("intake"));
   document.getElementById("back-from-progress")?.addEventListener("click", () => goToStep("history"));
@@ -2661,7 +2778,7 @@ function restoreSessionState() {
   if (!isSessionReady()) return false;
 
   const savedPrescription = loadPrescriptionFromSession();
-  const savedStep = sessionStorage.getItem("kj_current_step");
+  const savedStep = sessionStorage.getItem(sessionKey("kj_current_step"));
   const savedFormData = loadFormDataFromSession();
 
   if (savedPrescription && savedStep) {
@@ -2689,6 +2806,8 @@ registerStepLoader("knowledge", () => loadKnowledgePage());
 registerStepLoader("profiles", () => loadProfilesPage());
 registerStepLoader("library", () => loadActionLibrary());
 registerStepLoader("progress", () => loadProgressPage());
+registerStepLoader("collaboration", () => loadCollaborationPage());
+registerStepLoader("doctor", () => loadDoctorWorkspace());
 registerStepLoader("intake", () => {
   loadPatientProfiles();
   loadImagingReports();
@@ -2701,6 +2820,7 @@ registerStepLoader("intake", () => {
 registerStepLoader("prescription", () => {
   updatePrescriptionExportBar();
   updatePrescriptionFeedbackCard();
+  renderPrescriptionCollaboration();
 });
 setStepNavEl(document.querySelector(".step-nav"));
 

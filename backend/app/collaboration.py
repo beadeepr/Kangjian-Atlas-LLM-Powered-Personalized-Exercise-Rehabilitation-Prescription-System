@@ -10,6 +10,7 @@ from .knowledge import load_action_library
 
 
 ACTIVE_LINK_STATUS = "active"
+REVOKED_LINK_STATUS = "revoked"
 
 
 def is_doctor(user: models.UserModel) -> bool:
@@ -30,7 +31,36 @@ def doctor_patient_link_exists(db: Session, doctor_id: int, user_id: int, patien
     return query.first() is not None
 
 
+def resolve_patient_identity(
+    user: models.UserModel | None = None,
+    profile: models.PatientProfileModel | None = None,
+    prescription: models.PrescriptionModel | None = None,
+) -> tuple[str | None, int | None]:
+    name = None
+    age = None
+    if profile is not None:
+        name = profile.name
+        age = profile.age
+    if user is not None:
+        nickname = (user.nickname or "").strip()
+        if nickname and nickname not in {"?", "??", "???"}:
+            name = name or nickname
+        else:
+            name = name or user.account
+        if age is None:
+            age = user.age
+    if prescription is not None:
+        name = name or prescription.patient_name
+        if age is None:
+            age = prescription.patient_age
+    return name, age
+
+
 def review_response(review: models.PrescriptionReviewModel) -> dict[str, Any]:
+    prescription = review.prescription
+    profile = prescription.patient_profile if prescription else None
+    user = prescription.user if prescription else None
+    patient_name, patient_age = resolve_patient_identity(user, profile, prescription)
     return {
         "id": review.id,
         "prescription_id": review.prescription_id,
@@ -41,6 +71,8 @@ def review_response(review: models.PrescriptionReviewModel) -> dict[str, Any]:
         "patient_note": review.patient_note,
         "doctor_note": review.doctor_note,
         "risk_level": review.risk_level,
+        "patient_name": patient_name,
+        "patient_age": patient_age,
         "reviewed_at": review.reviewed_at,
         "created_at": review.created_at,
         "updated_at": review.updated_at,
@@ -48,6 +80,12 @@ def review_response(review: models.PrescriptionReviewModel) -> dict[str, Any]:
 
 
 def link_response(link: models.DoctorPatientLinkModel) -> dict[str, Any]:
+    patient_name, patient_age = resolve_patient_identity(link.user, link.patient_profile)
+    doctor = link.doctor
+    doctor_name = None
+    if doctor is not None:
+        nickname = (doctor.nickname or "").strip()
+        doctor_name = nickname if nickname and nickname not in {"?", "??", "???"} else doctor.account
     return {
         "id": link.id,
         "user_id": link.user_id,
@@ -56,10 +94,27 @@ def link_response(link: models.DoctorPatientLinkModel) -> dict[str, Any]:
         "status": link.status,
         "patient_note": link.patient_note,
         "doctor_note": link.doctor_note,
-        "patient_name": link.patient_profile.name if link.patient_profile else None,
+        "patient_name": patient_name,
+        "patient_age": patient_age,
+        "doctor_account": doctor.account if doctor else None,
+        "doctor_name": doctor_name,
         "created_at": link.created_at,
         "updated_at": link.updated_at,
     }
+
+
+def revoke_doctor_link(db: Session, link_id: int, current_user: models.UserModel) -> models.DoctorPatientLinkModel:
+    link = db.query(models.DoctorPatientLinkModel).filter(models.DoctorPatientLinkModel.id == link_id).first()
+    if not link:
+        raise ValueError("link not found")
+    if link.user_id != current_user.id and link.doctor_id != current_user.id:
+        raise PermissionError("not allowed to revoke this link")
+    if link.status != ACTIVE_LINK_STATUS:
+        raise ValueError("link is not active")
+    link.status = REVOKED_LINK_STATUS
+    db.commit()
+    db.refresh(link)
+    return link
 
 
 def adjustment_response(adjustment: models.PrescriptionAdjustmentModel) -> dict[str, Any]:

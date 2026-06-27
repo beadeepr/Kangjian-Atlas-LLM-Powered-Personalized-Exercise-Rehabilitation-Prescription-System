@@ -46,6 +46,8 @@ export const state = {
   feedbackRating: 0,
   adminUserFilter: { q: "" },
   adminFeedbackFilters: { status: "", category: "" },
+  progressReportPeriod: "weekly",
+  pendingAdjustments: [],
 };
 
 // Secondary pages (no step-nav button) map onto a nearest main-flow step
@@ -55,11 +57,17 @@ const SECONDARY_STEP_PARENT = {
   library: "intake",
   progress: "history",
   knowledge: "intake",
+  collaboration: "prescription",
+  doctor: "prescription",
   admin: "prescription",
 };
 
 const stepLoaders = new Map();
 let stepNavEl = null;
+
+export function sessionStorageKey(base, userId) {
+  return userId ? `${base}_${userId}` : base;
+}
 
 export function registerStepLoader(step, loader) {
   if (typeof loader === "function") stepLoaders.set(step, loader);
@@ -109,7 +117,10 @@ export function makeGoToStep(ctx) {
   return function goToStep(step) {
     state.currentStep = step;
     setHeaderMenuOpen(false);
-    sessionStorage.setItem("kj_current_step", step);
+    sessionStorage.setItem(
+      sessionStorageKey("kj_current_step", state.auth?.user?.id),
+      step
+    );
 
     document.querySelectorAll(".page").forEach((page) => {
       page.classList.toggle("active", page.id === `page-${step}`);

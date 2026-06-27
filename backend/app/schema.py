@@ -539,6 +539,9 @@ class DoctorPatientLinkResponse(BaseModel):
     patient_note: Optional[str] = None
     doctor_note: Optional[str] = None
     patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
+    doctor_account: Optional[str] = None
+    doctor_name: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -565,6 +568,8 @@ class PrescriptionReviewResponse(BaseModel):
     patient_note: Optional[str] = None
     doctor_note: Optional[str] = None
     risk_level: str
+    patient_name: Optional[str] = None
+    patient_age: Optional[int] = None
     reviewed_at: Optional[datetime] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
