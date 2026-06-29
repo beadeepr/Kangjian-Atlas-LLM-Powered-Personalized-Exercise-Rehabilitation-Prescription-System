@@ -4,6 +4,8 @@ from typing import Any
 
 import numpy as np
 
+from .deep_rehab_scorer import ML_ACTIONS, get_scorer
+
 COCO_KEYPOINTS = {
     "nose": 0,
     "left_eye": 1,
@@ -99,6 +101,15 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
         "ankle_pump": [COCO_KEYPOINTS["left_knee"], COCO_KEYPOINTS["right_knee"], COCO_KEYPOINTS["left_ankle"], COCO_KEYPOINTS["right_ankle"]],
         "shoulder_pendulum": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["left_wrist"], COCO_KEYPOINTS["right_wrist"]],
         "shoulder_external_rotation": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["left_hip"], COCO_KEYPOINTS["right_hip"]],
+        # ---- ML 动作：需要上身关键点 ----
+        "lifting_of_arms": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["left_wrist"], COCO_KEYPOINTS["right_wrist"]],
+        "shoulder_abduction_left": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["left_wrist"], COCO_KEYPOINTS["right_shoulder"]],
+        "shoulder_abduction_right": [COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["right_wrist"], COCO_KEYPOINTS["left_shoulder"]],
+        "shoulder_flexion_left": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["left_wrist"], COCO_KEYPOINTS["right_shoulder"]],
+        "shoulder_flexion_right": [COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["right_wrist"], COCO_KEYPOINTS["left_shoulder"]],
+        "shoulder_forward_elevation": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["left_wrist"], COCO_KEYPOINTS["right_wrist"]],
+        "elbow_flexion_left": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["left_wrist"]],
+        "elbow_flexion_right": [COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["right_wrist"]],
     }
     if not visibility:
         return None
@@ -153,6 +164,15 @@ def analyze_pose(action_id: str, keypoints: list[list[float]], visibility: list[
         "ankle_pump": _check_ankle_pump,
         "shoulder_pendulum": _check_shoulder_pendulum,
         "shoulder_external_rotation": _check_shoulder_external_rotation,
+        # ---- DeepRehabPile ML 评分动作 ----
+        "lifting_of_arms": _check_lifting_of_arms,
+        "shoulder_abduction_left": _check_shoulder_abduction_left,
+        "shoulder_abduction_right": _check_shoulder_abduction_right,
+        "shoulder_flexion_left": _check_shoulder_flexion_left,
+        "shoulder_flexion_right": _check_shoulder_flexion_right,
+        "shoulder_forward_elevation": _check_shoulder_forward_elevation,
+        "elbow_flexion_left": _check_elbow_flexion_left,
+        "elbow_flexion_right": _check_elbow_flexion_right,
     }
     checker = checkers.get(action_id)
     if not checker:
@@ -319,3 +339,58 @@ def _check_shoulder_external_rotation(keypoints: list[list[float]]) -> dict[str,
     if min(left_elbow_hip, right_elbow_hip) < 0.18:
         return _score_response(["肘部贴近身体，外旋方向正确。"], 92)
     return _score_response(["请把肘部夹紧身体侧面，再缓慢向外旋转前臂。"], 72)
+
+
+# ============================================================================
+# DeepRehabPile ML 评分动作（8 个新增）
+# ============================================================================
+# 这些动作不使用传统的几何规则评分，而是通过 DeepRehabPile 模型
+# 对一段骨架序列进行推理。每帧的评分结果来自模型缓存。
+
+
+def _check_ml_action(keypoints: list[list[float]], action_id: str) -> dict[str, Any]:
+    """ML 动作的通用 Checker：读取 DeepRehabScorer 缓存的评分。"""
+    scorer = get_scorer()
+    result = scorer.get_result(action_id)
+    if result is not None:
+        return result
+
+    # 模型尚未产生结果：提示正在进行 AI 评估
+    buf_size = scorer.buffer_size(action_id)
+    return {
+        "feedback": [f"AI 动作评估中… 已采集 {buf_size} 帧，请继续完成动作。"],
+        "score": 0,
+        "status": "warning",
+    }
+
+
+def _check_lifting_of_arms(keypoints: list[list[float]]) -> dict[str, Any]:
+    return _check_ml_action(keypoints, "lifting_of_arms")
+
+
+def _check_shoulder_abduction_left(keypoints: list[list[float]]) -> dict[str, Any]:
+    return _check_ml_action(keypoints, "shoulder_abduction_left")
+
+
+def _check_shoulder_abduction_right(keypoints: list[list[float]]) -> dict[str, Any]:
+    return _check_ml_action(keypoints, "shoulder_abduction_right")
+
+
+def _check_shoulder_flexion_left(keypoints: list[list[float]]) -> dict[str, Any]:
+    return _check_ml_action(keypoints, "shoulder_flexion_left")
+
+
+def _check_shoulder_flexion_right(keypoints: list[list[float]]) -> dict[str, Any]:
+    return _check_ml_action(keypoints, "shoulder_flexion_right")
+
+
+def _check_shoulder_forward_elevation(keypoints: list[list[float]]) -> dict[str, Any]:
+    return _check_ml_action(keypoints, "shoulder_forward_elevation")
+
+
+def _check_elbow_flexion_left(keypoints: list[list[float]]) -> dict[str, Any]:
+    return _check_ml_action(keypoints, "elbow_flexion_left")
+
+
+def _check_elbow_flexion_right(keypoints: list[list[float]]) -> dict[str, Any]:
+    return _check_ml_action(keypoints, "elbow_flexion_right")

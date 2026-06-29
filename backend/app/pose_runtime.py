@@ -13,6 +13,7 @@ from typing import Any
 import numpy as np
 
 from .algorithms import analyze_pose
+from .deep_rehab_scorer import ML_ACTIONS, get_scorer
 from .spatial import build_ar_overlay, build_skeleton_frame
 from .voice_feedback import build_voice_cue
 
@@ -276,6 +277,11 @@ class PoseStreamManager:
     async def process_frame(self, frame: PoseFrame, session: PoseStreamSession | None = None) -> dict[str, Any]:
         started = time.perf_counter()
         inference = self._resolve_keypoints(frame)
+
+        # ---- DeepRehabPile ML 动作：帧缓冲 ----
+        if frame.action_id in ML_ACTIONS:
+            get_scorer().buffer_frame(frame.action_id, inference["keypoints"])
+
         result = analyze_pose(
             action_id=frame.action_id,
             keypoints=inference["keypoints"],
