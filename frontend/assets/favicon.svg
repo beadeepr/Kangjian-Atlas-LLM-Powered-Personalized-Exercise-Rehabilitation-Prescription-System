@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="�e�1">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1a73e8" />
+      <stop offset="100%" stop-color="#19b6a3" />
+    </linearGradient>
+  </defs>
+  <rect width="32" height="32" rx="8" fill="url(#bg)" />
+  <text
+    x="16"
+    y="22"
+    text-anchor="middle"
+    fill="#ffffff"
+    font-size="17"
+    font-weight="700"
+    font-family="Segoe UI, PingFang SC, Microsoft YaHei, sans-serif"
+  >�</text>
+</svg>

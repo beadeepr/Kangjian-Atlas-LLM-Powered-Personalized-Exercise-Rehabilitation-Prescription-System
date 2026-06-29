@@ -18,13 +18,26 @@ function readDevMode() {
   return query.get("dev") === "true" || query.get("dev") === "1";
 }
 
+// 开发默认连本机后端。答辩/录屏请用 http://localhost:端口 打开前端，避免地址栏出现内网 IP。
+// 跨设备局域网演示时，可在 index.html 前面临时设置 window.API_BASE = "http://<主机IP>:8000/api"。
+function readApiBase() {
+  if (window.API_BASE) {
+    return window.API_BASE;
+  }
+  const { protocol, hostname, port } = window.location;
+  if (port === "8000") {
+    return "/api";
+  }
+  const host = hostname === "localhost" ? "127.0.0.1" : hostname;
+  return `${protocol}//${host}:8000/api`;
+}
+
 window.APP_CONFIG = {
-  API_BASE:
-    window.API_BASE ||
-    `${window.location.protocol}//${window.location.hostname}:8000/api`,
+  API_BASE: readApiBase(),
   DEMO_MODE: readDemoMode(),
   DEV_MODE: readDevMode(),
-  FETCH_TIMEOUT_MS: 2000,
+  FETCH_TIMEOUT_MS: 5000,
+  LIST_TIMEOUT_MS: 8000,
   AUTH_TIMEOUT_MS: 10000,
   PRESCRIPTION_TIMEOUT_MS: 45000,
   POSE_TIMEOUT_MS: 2000,
@@ -98,8 +111,27 @@ window.APP_CONFIG = {
     straight_leg_raise: "侧躺对镜头，便于观察抬腿高度与膝部角度",
     shoulder_external_rotation: "正面对镜头，确保肘部贴紧身体且肩部入镜",
   },
+  isSafeMediaUrl(path) {
+    if (!path || typeof path !== "string") return false;
+    const trimmed = path.trim();
+    if (!trimmed || trimmed.includes("\0")) return false;
+    if (trimmed.startsWith("//")) return false;
+    if (/^[a-zA-Z][a-zA-Z\d+\-.]*:/.test(trimmed)) {
+      try {
+        const protocol = new URL(trimmed).protocol;
+        return protocol === "http:" || protocol === "https:";
+      } catch {
+        return false;
+      }
+    }
+    return true;
+  },
   assetUrl(path) {
+    if (!this.isSafeMediaUrl(path)) return "";
     return new URL(path, window.location.href).href;
+  },
+  isValidVideoUrl(url) {
+    return this.isSafeMediaUrl(url);
   },
   setDemoMode(enabled) {
     localStorage.setItem("kj_demo_mode", enabled ? "true" : "false");

@@ -549,9 +549,9 @@ export function createAdminPage(ctx) {
 
     try {
       const [actionsRes, metaRes, deployRes, testReport, dashboard, users, feedbackItems] = await Promise.all([
-        fetchWithTimeout(buildAdminActionsUrl(), { headers: authHeaders() }),
-        fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions/meta`, { headers: authHeaders() }),
-        fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/deployment/info`),
+        fetchWithTimeout(buildAdminActionsUrl(), { headers: authHeaders() }, window.APP_CONFIG.LIST_TIMEOUT_MS),
+        fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/admin/actions/meta`, { headers: authHeaders() }, window.APP_CONFIG.LIST_TIMEOUT_MS),
+        fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/deployment/info`, {}, window.APP_CONFIG.LIST_TIMEOUT_MS),
         fetchAdminTestReport(),
         fetchAdminDashboard().catch(() => null),
         fetchAdminUsers().catch(() => []),

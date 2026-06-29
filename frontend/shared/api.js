@@ -41,7 +41,7 @@ export async function parseApiErrorDetail(response) {
 
 // fetch with an AbortController-based timeout. Pure: takes the URL and options
 // (including any auth headers) the caller already prepared.
-export async function fetchWithTimeout(url, options = {}, timeoutMs = 2000) {
+export async function fetchWithTimeout(url, options = {}, timeoutMs = 5000) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {

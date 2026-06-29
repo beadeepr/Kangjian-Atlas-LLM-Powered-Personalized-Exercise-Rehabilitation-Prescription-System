@@ -246,6 +246,17 @@ body.dev-mode .dev-only {
   color: #137333;
 }
 
+.tag-demo {
+  margin-left: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #fff4e5;
+  color: #b06000;
+  vertical-align: middle;
+}
+
 .btn-small {
   padding: 6px 12px;
   font-size: 0.85rem;
@@ -3042,4 +3053,15 @@ textarea {
   margin-top: 16px;
   padding-top: 14px;
   border-top: 1px dashed rgba(148, 163, 184, 0.45);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

@@ -156,8 +156,9 @@ export function createKnowledgePage(ctx) {
     }
   }
 
-  function renderKnowledgeQaResult(result) {
+  function renderKnowledgeQaResult(result, { isDemo = false } = {}) {
     if (!els.knowledgeQaResult) return;
+    const demoBadge = isDemo ? `<span class="tag tag-demo">Demo 模拟回答</span>` : "";
     const refs = (result.references || [])
       .slice(0, 3)
       .map((a) => `<li>${escapeHtml(a.title)}</li>`)
@@ -175,7 +176,7 @@ export function createKnowledgePage(ctx) {
     els.knowledgeQaResult.hidden = false;
     els.knowledgeQaResult.innerHTML = `
     <div class="knowledge-qa-answer">
-      <h3>回答</h3>
+      <h3>回答 ${demoBadge}</h3>
       <p>${escapeHtml(result.answer)}</p>
       ${ragHint}
     </div>
@@ -211,7 +212,7 @@ export function createKnowledgePage(ctx) {
           { timeoutMs: window.APP_CONFIG.PRESCRIPTION_TIMEOUT_MS }
         );
       }
-      renderKnowledgeQaResult(result);
+      renderKnowledgeQaResult(result, { isDemo: window.APP_CONFIG.DEMO_MODE });
     } catch (error) {
       if (els.knowledgeQaResult) {
         els.knowledgeQaResult.innerHTML = `<p class="hint">${escapeHtml(error.message || "问答请求失败")}</p>`;

@@ -134,9 +134,11 @@ export function createProfilesPage(ctx) {
     }
     els.profilesList.innerHTML = "<p class=\"hint\">正在加载…</p>";
     try {
-      const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/patient_profiles`, {
-        headers: authHeaders(),
-      });
+      const response = await fetchWithTimeout(
+        `${window.APP_CONFIG.API_BASE}/patient_profiles`,
+        { headers: authHeaders() },
+        window.APP_CONFIG.LIST_TIMEOUT_MS
+      );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       state.patientProfiles = await response.json();
       renderPatientProfileSelect();
@@ -165,11 +167,15 @@ export function createProfilesPage(ctx) {
     const url = editId
       ? `${window.APP_CONFIG.API_BASE}/patient_profiles/${editId}`
       : `${window.APP_CONFIG.API_BASE}/patient_profiles`;
-    const response = await fetchWithTimeout(url, {
-      method: editId ? "PUT" : "POST",
-      headers: authHeaders({ "Content-Type": "application/json" }),
-      body: JSON.stringify(payload),
-    });
+    const response = await fetchWithTimeout(
+      url,
+      {
+        method: editId ? "PUT" : "POST",
+        headers: authHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify(payload),
+      },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
+    );
     if (!response.ok) {
       showErrorToast("档案保存失败");
       return;
@@ -189,7 +195,8 @@ export function createProfilesPage(ctx) {
     if (!window.confirm("确定删除该健康档案？")) return;
     const response = await fetchWithTimeout(
       `${window.APP_CONFIG.API_BASE}/patient_profiles/${profileId}`,
-      { method: "DELETE", headers: authHeaders() }
+      { method: "DELETE", headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
     );
     if (!response.ok) {
       showErrorToast("删除失败");
@@ -237,7 +244,8 @@ export function createProfilesPage(ctx) {
     if (!window.confirm("确定删除该影像报告记录？")) return;
     const response = await fetchWithTimeout(
       `${window.APP_CONFIG.API_BASE}/imaging_reports/${reportId}`,
-      { method: "DELETE", headers: authHeaders() }
+      { method: "DELETE", headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
     );
     if (!response.ok) {
       showErrorToast("删除失败");
@@ -263,9 +271,11 @@ export function createProfilesPage(ctx) {
       const params = state.selectedPatientProfileId
         ? `?patient_profile_id=${state.selectedPatientProfileId}`
         : "";
-      const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/imaging_reports${params}`, {
-        headers: authHeaders(),
-      });
+      const response = await fetchWithTimeout(
+        `${window.APP_CONFIG.API_BASE}/imaging_reports${params}`,
+        { headers: authHeaders() },
+        window.APP_CONFIG.LIST_TIMEOUT_MS
+      );
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const reports = await response.json();
       const seen = new Set();
@@ -323,11 +333,15 @@ export function createProfilesPage(ctx) {
 
     setLoading(true, "正在上传并分析影像报告…");
     try {
-      const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/imaging_reports`, {
-        method: "POST",
-        headers: authHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify(payload),
-      });
+      const response = await fetchWithTimeout(
+        `${window.APP_CONFIG.API_BASE}/imaging_reports`,
+        {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify(payload),
+        },
+        window.APP_CONFIG.LIST_TIMEOUT_MS
+      );
       if (!response.ok) {
         const detail = await parseApiError(response);
         showErrorToast(detail || "上传失败");
@@ -402,9 +416,11 @@ export function createProfilesPage(ctx) {
   async function loadPatientProfiles() {
     if (!apiEnabled() || !els.patientProfileSelect) return;
     try {
-      const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/patient_profiles`, {
-        headers: authHeaders(),
-      });
+      const response = await fetchWithTimeout(
+        `${window.APP_CONFIG.API_BASE}/patient_profiles`,
+        { headers: authHeaders() },
+        window.APP_CONFIG.LIST_TIMEOUT_MS
+      );
       if (!response.ok) return;
       state.patientProfiles = await response.json();
       renderPatientProfileSelect();
@@ -439,7 +455,8 @@ export function createProfilesPage(ctx) {
           pain_regions: formData.pain_regions,
           history: formData.history,
         }),
-      }
+      },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
     );
     if (!response.ok) return null;
     const profile = await response.json();

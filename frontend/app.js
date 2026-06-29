@@ -353,7 +353,7 @@ async function submitAuth(mode) {
       error?.name === "AbortError"
         ? "登录请求超时，请确认后端已启动"
         : isNetworkError
-          ? "无法连接后端，请确认服务运行在 localhost:8000"
+          ? "无法连接后端，请确认后端服务已启动"
           : "登录失败，请稍后重试"
     );
   } finally {
@@ -1077,7 +1077,9 @@ async function fetchActionDetail(action) {
   }
   try {
     const response = await fetchWithTimeout(
-      `${window.APP_CONFIG.API_BASE}/actions/${encodeURIComponent(actionId)}`
+      `${window.APP_CONFIG.API_BASE}/actions/${encodeURIComponent(actionId)}`,
+      {},
+      window.APP_CONFIG.LIST_TIMEOUT_MS
     );
     if (!response.ok) return window.MockService.enrichAction(action);
     return window.MockService.enrichAction(await response.json());
@@ -1136,7 +1138,11 @@ async function loadActionLibrary() {
         window.MockService.enrichAction(item)
       );
     } else {
-      const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/actions`);
+      const response = await fetchWithTimeout(
+        `${window.APP_CONFIG.API_BASE}/actions`,
+        {},
+        window.APP_CONFIG.LIST_TIMEOUT_MS
+      );
       if (!response.ok) throw new Error("actions unavailable");
       const data = await response.json();
       state.actionLibrary = data.map((action) => window.MockService.enrichAction(action));
@@ -1367,7 +1373,11 @@ async function loadProgressStats() {
   if (!grid) return;
   grid.innerHTML = '<p class="hint">正在加载…</p>';
   try {
-    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/training_checkins/visualization?days=30`, { headers: authHeaders() });
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/training_checkins/visualization?days=30`,
+      { headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
+    );
     if (!response.ok) throw new Error();
     const data = await response.json();
     const trend = data.trend?.points || [];
@@ -1427,7 +1437,8 @@ async function loadProgressReport() {
   try {
     const response = await fetchWithTimeout(
       `${window.APP_CONFIG.API_BASE}/training_checkins/report?period=${period}`,
-      { headers: authHeaders() }
+      { headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
     );
     if (!response.ok) throw new Error();
     const r = await response.json();
@@ -1452,7 +1463,8 @@ async function exportProgressReport() {
   try {
     const response = await fetchWithTimeout(
       `${window.APP_CONFIG.API_BASE}/training_checkins/report/export?period=${period}&format=markdown`,
-      { headers: authHeaders() }
+      { headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
     );
     if (!response.ok) throw new Error();
     const text = await response.text();
@@ -1635,7 +1647,8 @@ async function exportPrescription(format) {
   try {
     const response = await fetchWithTimeout(
       `${window.APP_CONFIG.API_BASE}/prescriptions/${prescriptionId}/export?format=${format}`,
-      { headers: authHeaders() }
+      { headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
     );
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const blob = await response.blob();
@@ -1692,7 +1705,8 @@ async function loadTrainingStats() {
   try {
     const response = await fetchWithTimeout(
       `${window.APP_CONFIG.API_BASE}/training_checkins/visualization?days=30`,
-      { headers: authHeaders() }
+      { headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
     );
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     const data = await response.json();
@@ -1797,9 +1811,11 @@ async function loadPrescriptionHistory() {
 
   els.prescriptionHistory.textContent = "正在加载…";
   try {
-    const response = await fetchWithTimeout(`${window.APP_CONFIG.API_BASE}/prescriptions`, {
-      headers: authHeaders(),
-    });
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/prescriptions`,
+      { headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
+    );
     if (response.status === 401) {
       logoutSession();
       els.prescriptionHistory.textContent = "登录已过期，请重新登录。";
@@ -1914,12 +1930,8 @@ function handleActionImageError(img) {
 }
 window.handleActionImageError = handleActionImageError;
 
-function isValidVideoUrl(url) {
-  return typeof url === "string" && url.startsWith("http");
-}
-
 function renderActionVideoMarkup(action) {
-  if (isValidVideoUrl(action.videoUrl)) {
+  if (window.APP_CONFIG.isValidVideoUrl(action.videoUrl)) {
     return `<button class="btn btn-secondary btn-small action-video-btn" type="button" data-video-url="${escapeAdminText(action.videoUrl)}">▶ 观看示范视频</button>`;
   }
   return "";
@@ -2139,17 +2151,21 @@ function queuePosePayload(frame) {
   }
 
   if (frame.keypoints && frame.visibility && (frame.keypoints.length !== 17 || frame.visibility.length !== 17)) {
-    console.warn("partial pose frame received", {
-      keypoints: frame.keypoints?.length,
-      visibility: frame.visibility?.length,
-    });
+    if (window.APP_CONFIG.DEV_MODE) {
+      console.warn("partial pose frame received", {
+        keypoints: frame.keypoints?.length,
+        visibility: frame.visibility?.length,
+      });
+    }
     // 允许继续发送不完整的关键点，让后端决定如何处理
   }
 
   const avgVisibility = averageVisibility(frame.visibility);
   if (avgVisibility < window.APP_CONFIG.POSE_VISIBILITY_MIN) {
     // 原先这里会阻断并显示提示；现改为仅记录警告并继续发送，由后端决定如何处理
-    console.warn("low average visibility", { avgVisibility });
+    if (window.APP_CONFIG.DEV_MODE) {
+      console.warn("low average visibility", { avgVisibility });
+    }
   }
 
   const now = Date.now();
@@ -2267,7 +2283,7 @@ async function showDemoAsync(action) {
   if (progEl) progEl.textContent = detail.progression || "";
 
   if (videoWrap && videoLink && videoHintEl) {
-    if (isValidVideoUrl(detail.videoUrl)) {
+    if (window.APP_CONFIG.isValidVideoUrl(detail.videoUrl)) {
       videoLink.href = "#";
       videoLink.dataset.videoUrl = detail.videoUrl;
       videoLink.hidden = false;
