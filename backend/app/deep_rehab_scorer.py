@@ -194,6 +194,17 @@ class DeepRehabScorer:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _coco17_array(keypoints: list[list[float]]) -> np.ndarray:
+        """Normalize COCO-17 keypoints to shape (17, 2)."""
+        coco = np.zeros((N_JOINTS, N_DIM), dtype=np.float32)
+        for index, point in enumerate(keypoints[:N_JOINTS]):
+            if not point:
+                continue
+            coco[index, 0] = float(point[0])
+            coco[index, 1] = float(point[1])
+        return coco
+
+    @staticmethod
     def _extract_coco17(keypoints_mp33: list[list[float]]) -> np.ndarray:
         """从 MediaPipe 33 点格式中提取 COCO 17 关键点的 (x, y)。
 
@@ -243,6 +254,24 @@ class DeepRehabScorer:
             buf_len = len(self._buffers[action_id])
 
         # 触发条件：缓冲区满 或 满足采样间隔
+        if buf_len == TARGET_LENGTH or (buf_len >= self._inference_interval and buf_len % self._inference_interval == 0):
+            self._run_inference(action_id)
+            return True
+        return False
+
+    def buffer_frame_coco17(self, action_id: str, keypoints_coco17: list[list[float]]) -> bool:
+        """Buffer a COCO-17 frame (from /correct_pose or browser pose pipeline)."""
+        if not self.is_ready:
+            return False
+        if action_id not in ML_ACTIONS:
+            return False
+
+        with self._buffer_lock:
+            if action_id not in self._buffers:
+                self._buffers[action_id] = deque(maxlen=TARGET_LENGTH)
+            self._buffers[action_id].append(self._coco17_array(keypoints_coco17))
+            buf_len = len(self._buffers[action_id])
+
         if buf_len == TARGET_LENGTH or (buf_len >= self._inference_interval and buf_len % self._inference_interval == 0):
             self._run_inference(action_id)
             return True

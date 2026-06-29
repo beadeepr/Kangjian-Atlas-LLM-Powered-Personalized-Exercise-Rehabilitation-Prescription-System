@@ -144,6 +144,8 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
 
 def analyze_pose(action_id: str, keypoints: list[list[float]], visibility: list[float]) -> dict[str, Any]:
     action_id = "neck_chin_tuck" if action_id == "chin_tuck" else action_id
+    if action_id in ML_ACTIONS and len(keypoints) <= 17:
+        get_scorer().buffer_frame_coco17(action_id, keypoints)
     if result := _visibility_guard(action_id, keypoints, visibility):
         return result
 
