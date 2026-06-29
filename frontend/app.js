@@ -1,4 +1,4 @@
-import { PoseTracker } from "./pose.js?v=20260629a";
+import { PoseTracker } from "./pose.js?v=20260629b";
 import {
   escapeHtml,
   escapeAdminText,

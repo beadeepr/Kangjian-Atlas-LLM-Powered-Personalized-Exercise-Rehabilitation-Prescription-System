@@ -477,11 +477,12 @@ export class PoseTracker {
                   visibility || json.visibility
                 );
               } else if (this.displayKeypoints && this.displayVisibility) {
-              this._drawFrame();
-            } else if (this.lastValidKeypoints && this.lastValidVisibility) {
-              this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
-              this.displayVisibility = this.lastValidVisibility.slice();
-              this._drawFrame();
+                this._drawFrame();
+              } else if (this.lastValidKeypoints && this.lastValidVisibility) {
+                this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));
+                this.displayVisibility = this.lastValidVisibility.slice();
+                this._drawFrame();
+              }
             }
           } catch (err) {
             if (this.displayKeypoints && this.displayVisibility) {
