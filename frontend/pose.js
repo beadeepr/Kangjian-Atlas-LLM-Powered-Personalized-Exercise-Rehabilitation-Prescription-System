@@ -6,6 +6,63 @@ const POSE_CONNECTIONS = [
   [11, 13], [13, 15], [12, 14], [14, 16], // legs
 ];
 
+const COCO17_TO_MP33 = {
+  0: 0,
+  1: 2,
+  2: 5,
+  3: 7,
+  4: 8,
+  5: 11,
+  6: 12,
+  7: 13,
+  8: 14,
+  9: 15,
+  10: 16,
+  11: 23,
+  12: 24,
+  13: 25,
+  14: 26,
+  15: 27,
+  16: 28,
+};
+
+function normalizeToCoco17(rawKeypoints, rawVisibility) {
+  if (!rawKeypoints?.length) return null;
+  const toPoint = (kp) => ({
+    x: kp[0] ?? kp.x ?? 0,
+    y: kp[1] ?? kp.y ?? 0,
+    z: kp[2] ?? kp.z ?? 0,
+  });
+  const toScore = (kp, index) => {
+    if (Array.isArray(rawVisibility) && rawVisibility[index] != null) {
+      return Number(rawVisibility[index]);
+    }
+    if (Array.isArray(kp) && kp[3] != null) return Number(kp[3]);
+    return 1;
+  };
+
+  if (rawKeypoints.length === 17) {
+    return {
+      keypoints: rawKeypoints.map(toPoint),
+      visibility: rawKeypoints.map((kp, index) => toScore(kp, index)),
+    };
+  }
+
+  if (rawKeypoints.length >= 33) {
+    const keypoints = [];
+    const visibility = [];
+    for (let coco = 0; coco < 17; coco += 1) {
+      const mp = COCO17_TO_MP33[coco];
+      const kp = rawKeypoints[mp] ?? [0, 0, 0];
+      keypoints.push(toPoint(kp));
+      visibility.push(toScore(kp, mp));
+    }
+    return { keypoints, visibility };
+  }
+
+  return null;
+}
+
 export class PoseTracker {
   constructor({ video, canvas, onFrame, onPoseResult, getActionId, getAuthHeaders }) {
     this.video = video;
@@ -290,12 +347,9 @@ export class PoseTracker {
   }
 
   _applyKeypoints(rawKeypoints, rawVisibility) {
-    const keypoints = (rawKeypoints || []).map((kp) => ({
-      x: kp[0] ?? kp.x,
-      y: kp[1] ?? kp.y,
-      z: kp[2] ?? kp.z ?? 0,
-    }));
-    const visibility = rawVisibility || keypoints.map(() => 1);
+    const normalized = normalizeToCoco17(rawKeypoints, rawVisibility);
+    if (!normalized) return false;
+    const { keypoints, visibility } = normalized;
     if (keypoints.length !== 17 || visibility.length !== 17) return false;
 
     const nowTs = performance.now() / 1000;
@@ -408,9 +462,21 @@ export class PoseTracker {
               this.lastArOverlay = json.ar_overlay || null;
             }
 
-            if (json && this._applyKeypoints(json.keypoints, json.visibility)) {
-              this._emitPoseResult(json, json.keypoints, json.visibility);
-            } else if (this.displayKeypoints && this.displayVisibility) {
+            if (json) {
+              const normalized = normalizeToCoco17(json.keypoints, json.visibility);
+              const keypoints = normalized?.keypoints;
+              const visibility = normalized?.visibility;
+              const hasFeedback = Array.isArray(json.feedback) && json.feedback.length > 0;
+
+              if (keypoints && this._applyKeypoints(keypoints, visibility)) {
+                this._emitPoseResult(json, keypoints, visibility);
+              } else if (hasFeedback) {
+                this._emitPoseResult(
+                  json,
+                  keypoints || json.keypoints,
+                  visibility || json.visibility
+                );
+              } else if (this.displayKeypoints && this.displayVisibility) {
               this._drawFrame();
             } else if (this.lastValidKeypoints && this.lastValidVisibility) {
               this.displayKeypoints = this.lastValidKeypoints.map((p) => ({ x: p.x, y: p.y, z: p.z }));

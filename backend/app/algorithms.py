@@ -61,6 +61,55 @@ def _score_response(feedback: list[str], score: int) -> dict[str, Any]:
     return {"feedback": feedback, "score": score, "status": status}
 
 
+COCO17_TO_MEDIAPIPE33 = {
+    0: 0,
+    1: 2,
+    2: 5,
+    3: 7,
+    4: 8,
+    5: 11,
+    6: 12,
+    7: 13,
+    8: 14,
+    9: 15,
+    10: 16,
+    11: 23,
+    12: 24,
+    13: 25,
+    14: 26,
+    15: 27,
+    16: 28,
+}
+
+
+def _normalize_to_coco17(
+    keypoints: list[list[float]],
+    visibility: list[float] | None,
+) -> tuple[list[list[float]], list[float]]:
+    if not keypoints:
+        return keypoints, visibility or []
+    if len(keypoints) <= 17:
+        vis = visibility or [1.0] * len(keypoints)
+        return keypoints, vis
+
+    if len(keypoints) >= 33:
+        coco_keypoints: list[list[float]] = []
+        coco_visibility: list[float] = []
+        for coco_idx in range(17):
+            mp_idx = COCO17_TO_MEDIAPIPE33[coco_idx]
+            point = keypoints[mp_idx] if mp_idx < len(keypoints) else [0.0, 0.0, 0.0]
+            coco_keypoints.append(point)
+            if visibility and mp_idx < len(visibility):
+                coco_visibility.append(float(visibility[mp_idx]))
+            elif len(point) > 3:
+                coco_visibility.append(float(point[3]))
+            else:
+                coco_visibility.append(1.0)
+        return coco_keypoints, coco_visibility
+
+    return keypoints, visibility or [1.0] * len(keypoints)
+
+
 KEYPOINT_NAMES = {
     0: "鼻子",
     1: "左眼",
@@ -142,9 +191,16 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
     }
 
 
-def analyze_pose(action_id: str, keypoints: list[list[float]], visibility: list[float]) -> dict[str, Any]:
+def analyze_pose(
+    action_id: str,
+    keypoints: list[list[float]],
+    visibility: list[float],
+    *,
+    ml_buffered: bool = False,
+) -> dict[str, Any]:
     action_id = "neck_chin_tuck" if action_id == "chin_tuck" else action_id
-    if action_id in ML_ACTIONS and len(keypoints) <= 17:
+    keypoints, visibility = _normalize_to_coco17(keypoints, visibility)
+    if action_id in ML_ACTIONS and not ml_buffered:
         get_scorer().buffer_frame_coco17(action_id, keypoints)
     if result := _visibility_guard(action_id, keypoints, visibility):
         return result

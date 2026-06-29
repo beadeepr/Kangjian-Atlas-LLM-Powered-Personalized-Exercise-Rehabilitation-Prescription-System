@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from .algorithms import analyze_pose
+from .algorithms import analyze_pose, _normalize_to_coco17
 from .deep_rehab_scorer import ML_ACTIONS, get_scorer
 from .spatial import build_ar_overlay, build_skeleton_frame
 from .voice_feedback import build_voice_cue
@@ -278,14 +278,21 @@ class PoseStreamManager:
         started = time.perf_counter()
         inference = self._resolve_keypoints(frame)
 
-        # ---- DeepRehabPile ML 动作：帧缓冲 ----
+        ml_buffered = False
         if frame.action_id in ML_ACTIONS:
             get_scorer().buffer_frame(frame.action_id, inference["keypoints"])
+            ml_buffered = True
+
+        coco_keypoints, coco_visibility = _normalize_to_coco17(
+            inference["keypoints"],
+            inference["visibility"],
+        )
 
         result = analyze_pose(
             action_id=frame.action_id,
-            keypoints=inference["keypoints"],
-            visibility=inference["visibility"],
+            keypoints=coco_keypoints,
+            visibility=coco_visibility,
+            ml_buffered=ml_buffered,
         )
         latency_ms = round((time.perf_counter() - started) * 1000, 2)
         if session:

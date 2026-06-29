@@ -1,4 +1,4 @@
-import { PoseTracker } from "./pose.js";
+import { PoseTracker } from "./pose.js?v=20260629a";
 import {
   escapeHtml,
   escapeAdminText,
@@ -1110,7 +1110,7 @@ function filterActionLibrary(actions) {
 }
 
 function renderLibraryActionCard(action) {
-  const poseSupported = window.APP_CONFIG.isPoseSupported(action.id);
+  const poseSupported = isActionPoseSupported(action);
   return `
     <article class="action-card card">
       <div class="action-image-wrap">
@@ -1949,7 +1949,7 @@ function renderPrescription(prescription) {
   els.actionList.innerHTML = "";
 
   prescription.actions.forEach((action) => {
-    const poseSupported = window.APP_CONFIG.isPoseSupported(action.id);
+    const poseSupported = isActionPoseSupported(action);
     const card = document.createElement("article");
     card.className = "action-card card";
     card.innerHTML = `
@@ -2095,6 +2095,16 @@ function getPoseActionId(action) {
   return action?.backendId || window.APP_CONFIG.getBackendActionId(action?.id) || action?.id;
 }
 
+function resolveActionPoseId(action) {
+  return action?.id || action?.backendId || null;
+}
+
+function isActionPoseSupported(actionOrId) {
+  const actionId =
+    typeof actionOrId === "string" ? actionOrId : resolveActionPoseId(actionOrId);
+  return window.APP_CONFIG.isPoseSupported(actionId);
+}
+
 function getPoseMissingVisibilityFeedback(actionId, visibility) {
   const backendActionId = window.APP_CONFIG.getBackendActionId(actionId);
   const required = window.APP_CONFIG.POSE_REQUIRED_KEYPOINTS?.[backendActionId] || [];
@@ -2132,6 +2142,15 @@ function handlePoseResult(result) {
       score: result.score ?? 0,
       status: result.status || "warning",
       voice_cue: result.voice_cue || null,
+    });
+    return;
+  }
+  const keypoints = result?.keypoints;
+  if (keypoints?.length && typeof keypoints[0] === "object" && !Array.isArray(keypoints[0])) {
+    queuePosePayload({
+      ...result,
+      keypoints: keypoints.map((point) => [point.x, point.y, point.z ?? 0]),
+      visibility: result.visibility || keypoints.map(() => 1),
     });
     return;
   }
@@ -2299,7 +2318,7 @@ async function showDemoAsync(action) {
     }
   }
 
-  const poseSupported = window.APP_CONFIG.isPoseSupported(detail.id);
+  const poseSupported = isActionPoseSupported(detail);
   if (startBtn) {
     startBtn.hidden = !poseSupported;
   }
@@ -2308,7 +2327,7 @@ async function showDemoAsync(action) {
 }
 
 function startTraining(action) {
-  if (!window.APP_CONFIG.isPoseSupported(action.id)) {
+  if (!isActionPoseSupported(action)) {
     showWarnToast("该动作暂不支持实时纠正，请选择支持的动作进行跟练。");
     return;
   }
@@ -2783,7 +2802,7 @@ function bindEvents() {
       const step = button.dataset.step;
       if (step !== "login" && !isSessionReady()) return;
       if ((step === "demo" || step === "training") && !state.currentAction) return;
-      if (step === "training" && !window.APP_CONFIG.isPoseSupported(state.currentAction?.id)) return;
+      if (step === "training" && !isActionPoseSupported(state.currentAction)) return;
       if (step === "prescription" && !state.prescription) return;
       goToStep(step);
     });
