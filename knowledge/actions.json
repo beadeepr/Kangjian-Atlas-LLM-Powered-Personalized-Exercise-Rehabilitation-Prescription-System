@@ -299,6 +299,186 @@
       "contraindications": "急性肩袖撕裂、外旋时锐痛明显者禁忌。",
       "progression": "无疼痛后逐步增加弹力带阻力。",
       "regression": "改为无阻力外旋或等长收缩。"
+    },
+    {
+      "id": "mckenzie_press_up",
+      "name": "麦肯基俯卧撑",
+      "target_conditions": [
+        "腰椎间盘突出",
+        "腰痛"
+      ],
+      "body_regions": [
+        "腰部"
+      ],
+      "sets": 3,
+      "reps": 10,
+      "frequency": "每日1-2次",
+      "description": "俯卧位双手撑地，骨盆尽量贴近床面，缓慢伸直肘部抬起上半身，腰部保持可耐受的伸展。",
+      "contraindications": "伸展后腿痛加重、急性腰椎骨折、马尾综合征风险者禁忌。",
+      "progression": "若疼痛向腰部集中且无下肢症状加重，可逐步增加次数。",
+      "regression": "先从俯卧放松或肘撑俯卧开始。"
+    },
+    {
+      "id": "lifting_of_arms",
+      "name": "抬臂",
+      "category": "活动度训练",
+      "target_conditions": [
+        "肩肘活动受限",
+        "上肢康复训练",
+        "术后活动度恢复"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
+      "sets": 3,
+      "reps": 10,
+      "frequency": "每日1-2次",
+      "description": "坐位或站位，缓慢将双臂抬至肩水平或舒适高度，保持2-3秒后放下，用于肩肘协调活动度训练。",
+      "contraindications": "肩关节脱位未复位、抬臂时锐痛或放射痛明显时暂停。",
+      "progression": "无痛范围内逐步增加抬臂高度与保持时间。",
+      "regression": "改为单侧小幅度抬臂或被动辅助活动。",
+      "note": "英文：Lifting of the arms | 数据集：KIMORE | 算法任务：分类+回归"
+    },
+    {
+      "id": "shoulder_abduction_left",
+      "name": "左肩外展",
+      "category": "活动度训练",
+      "target_conditions": [
+        "肩痛",
+        "肩关节活动受限"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
+      "sets": 3,
+      "reps": 10,
+      "frequency": "每日1-2次",
+      "description": "站位或坐位，左侧手臂沿身体侧面向外抬起至肩水平或舒适高度，缓慢还原，避免耸肩代偿。",
+      "contraindications": "左肩急性损伤、外展时剧烈疼痛或冻结肩急性期慎做。",
+      "progression": "稳定后增加外展角度与次数。",
+      "regression": "缩小外展幅度，改为仰卧滑臂或辅助外展。",
+      "note": "英文：Shoulder Abduction Left | 数据集：IRDS | 算法任务：分类"
+    },
+    {
+      "id": "shoulder_abduction_right",
+      "name": "右肩外展",
+      "category": "活动度训练",
+      "target_conditions": [
+        "肩痛",
+        "肩关节活动受限"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
+      "sets": 3,
+      "reps": 10,
+      "frequency": "每日1-2次",
+      "description": "站位或坐位，右侧手臂沿身体侧面向外抬起至肩水平或舒适高度，缓慢还原，避免耸肩代偿。",
+      "contraindications": "右肩急性损伤、外展时剧烈疼痛或冻结肩急性期慎做。",
+      "progression": "稳定后增加外展角度与次数。",
+      "regression": "缩小外展幅度，改为仰卧滑臂或辅助外展。",
+      "note": "英文：Shoulder Abduction Right | 数据集：IRDS | 算法任务：分类"
+    },
+    {
+      "id": "shoulder_flexion_left",
+      "name": "左肩屈曲",
+      "category": "活动度训练",
+      "target_conditions": [
+        "肩痛",
+        "肩关节活动受限"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
+      "sets": 3,
+      "reps": 10,
+      "frequency": "每日1-2次",
+      "description": "站位或坐位，左侧手臂沿身体前面向前上方抬起至肩水平或舒适高度，缓慢还原，保持躯干稳定。",
+      "contraindications": "左肩急性损伤、屈曲时锐痛或代偿明显时暂停。",
+      "progression": "无痛后逐步增加屈曲角度。",
+      "regression": "改为小幅度前屈或墙面滑臂辅助。",
+      "note": "英文：Shoulder Flexion Left | 数据集：IRDS | 算法任务：分类"
+    },
+    {
+      "id": "shoulder_flexion_right",
+      "name": "右肩屈曲",
+      "category": "活动度训练",
+      "target_conditions": [
+        "肩痛",
+        "肩关节活动受限"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
+      "sets": 3,
+      "reps": 10,
+      "frequency": "每日1-2次",
+      "description": "站位或坐位，右侧手臂沿身体前面向前上方抬起至肩水平或舒适高度，缓慢还原，保持躯干稳定。",
+      "contraindications": "右肩急性损伤、屈曲时锐痛或代偿明显时暂停。",
+      "progression": "无痛后逐步增加屈曲角度。",
+      "regression": "改为小幅度前屈或墙面滑臂辅助。",
+      "note": "英文：Shoulder Flexion Right | 数据集：IRDS | 算法任务：分类"
+    },
+    {
+      "id": "shoulder_forward_elevation",
+      "name": "肩前屈",
+      "category": "活动度训练",
+      "target_conditions": [
+        "肩痛",
+        "肩关节活动受限",
+        "抬手困难"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
+      "sets": 3,
+      "reps": 10,
+      "frequency": "每日1-2次",
+      "description": "站位或坐位，双臂或单臂沿身体前面向前上方抬起，至肩水平或舒适高度后缓慢放下，动作连贯可控。",
+      "contraindications": "肩关节急性损伤、前屈诱发明显疼痛或腰椎代偿时暂停。",
+      "progression": "稳定后增加抬臂高度与训练组数。",
+      "regression": "改为小幅度前屈或扶墙滑臂。",
+      "note": "英文：Shoulder Forward Elevation | 数据集：IRDS | 算法任务：分类"
+    },
+    {
+      "id": "elbow_flexion_left",
+      "name": "左肘屈曲",
+      "category": "活动度训练",
+      "target_conditions": [
+        "肘关节活动受限",
+        "上肢术后康复"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
+      "sets": 3,
+      "reps": 12,
+      "frequency": "每日1-2次",
+      "description": "坐位或站位，左侧前臂缓慢屈曲，使手靠近肩部，在无痛范围内充分弯曲后缓慢伸直。",
+      "contraindications": "左肘骨折未愈合、屈曲时剧烈疼痛或肿胀明显时暂停。",
+      "progression": "逐步增加屈曲角度与重复次数。",
+      "regression": "缩小屈曲幅度，改为被动辅助活动。",
+      "note": "英文：Elbow Flexion Left | 数据集：IRDS | 算法任务：分类"
+    },
+    {
+      "id": "elbow_flexion_right",
+      "name": "右肘屈曲",
+      "category": "活动度训练",
+      "target_conditions": [
+        "肘关节活动受限",
+        "上肢术后康复"
+      ],
+      "body_regions": [
+        "肩部"
+      ],
+      "sets": 3,
+      "reps": 12,
+      "frequency": "每日1-2次",
+      "description": "坐位或站位，右侧前臂缓慢屈曲，使手靠近肩部，在无痛范围内充分弯曲后缓慢伸直。",
+      "contraindications": "右肘骨折未愈合、屈曲时剧烈疼痛或肿胀明显时暂停。",
+      "progression": "逐步增加屈曲角度与重复次数。",
+      "regression": "缩小屈曲幅度，改为被动辅助活动。",
+      "note": "英文：Elbow Flexion Right | 数据集：IRDS | 算法任务：分类"
     }
   ]
 }

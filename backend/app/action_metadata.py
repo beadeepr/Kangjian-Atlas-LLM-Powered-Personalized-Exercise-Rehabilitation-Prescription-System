@@ -20,6 +20,14 @@ CATEGORY_BY_ID = {
     "shoulder_pendulum": "活动度训练",
     "shoulder_external_rotation": "力量训练",
     "mckenzie_press_up": "活动度训练",
+    "lifting_of_arms": "活动度训练",
+    "shoulder_abduction_left": "活动度训练",
+    "shoulder_abduction_right": "活动度训练",
+    "shoulder_flexion_left": "活动度训练",
+    "shoulder_flexion_right": "活动度训练",
+    "shoulder_forward_elevation": "活动度训练",
+    "elbow_flexion_left": "活动度训练",
+    "elbow_flexion_right": "活动度训练",
 }
 
 DIFFICULTY_BY_CATEGORY = {
