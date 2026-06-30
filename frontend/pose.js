@@ -1,3 +1,34 @@
+// =========================================================================
+// MediaPipe PoseLandmarker (browser-side pose estimation — Plan A)
+// 本地化文件，无需境外 CDN
+// =========================================================================
+import { PoseLandmarker, FilesetResolver } from "./mediapipe/vision_bundle.mjs";
+
+const MP_WASM_BASE = "./mediapipe/";
+const MP_MODEL_URL = "./models/pose_landmarker_lite.task";
+
+let _mpVision = null;
+let _mpPoseLandmarker = null;
+
+async function _ensureMediaPipe() {
+  if (_mpPoseLandmarker) return _mpPoseLandmarker;
+  if (!_mpVision) {
+    _mpVision = await FilesetResolver.forVisionTasks(MP_WASM_BASE);
+  }
+  _mpPoseLandmarker = await PoseLandmarker.createFromOptions(_mpVision, {
+    baseOptions: {
+      modelAssetPath: MP_MODEL_URL,
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numPoses: 1,
+    minPoseDetectionConfidence: 0.5,
+    minPosePresenceConfidence: 0.5,
+    minTrackingConfidence: 0.5,
+  });
+  return _mpPoseLandmarker;
+}
+
 // COCO-17 keypoint connections (suitable for backend 17-point model)
 const POSE_CONNECTIONS = [
   [0, 1], [0, 2], [1, 3], [2, 4], // head
@@ -94,6 +125,13 @@ export class PoseTracker {
     this._smoothing = 28;
     this._predictionTime = 0.08;
     this._maxPredictionTime = 0.16;
+
+    // ---------- 自适应 EMA 抗抖动 ----------
+    // 原始 33 点平滑状态（对 MediaPipe 输出做低通滤波）
+    this._smooth33Raw = null;
+    this._smoothAlphaMin = 0.10;       // 静止时极强平滑
+    this._smoothAlphaMax = 0.60;       // 快速运动时灵敏跟踪
+    this._smoothSpeedThreshold = 0.015; // 归一化坐标的速度阈值
   }
 
   _startRenderLoop() {
@@ -218,6 +256,11 @@ export class PoseTracker {
   async init() {
     this.backendMode = true;
     this.offscreen = document.createElement("canvas");
+    // 预加载 MediaPipe（后台异步，不阻塞页面渲染）
+    this._mpReady = _ensureMediaPipe().catch((err) => {
+      console.warn("MediaPipe 初始化失败，将回退到服务端 ONNX 推理:", err);
+      this._mpError = err;
+    });
   }
 
   resizeCanvas() {
@@ -346,6 +389,52 @@ export class PoseTracker {
     }
   }
 
+  /** 对 33 点关键点做自适应 EMA 低通滤波，消除静止时的微小抖动。
+   *
+   *  自适应 alpha：静止时 alpha → _smoothAlphaMin（强平滑），
+   *  快速运动时 alpha → _smoothAlphaMax（灵敏跟踪）。
+   */
+  _smoothKeypoints33(rawKeypoints33) {
+    if (!this._smooth33Raw || this._smooth33Raw.length !== 33) {
+      this._smooth33Raw = rawKeypoints33.map((p) => ({
+        x: p[0] ?? p.x ?? 0,
+        y: p[1] ?? p.y ?? 0,
+        z: p[2] ?? p.z ?? 0,
+      }));
+      return this._smooth33Raw.map((p) => [p.x, p.y, p.z]);
+    }
+
+    // 计算关键点集合的最大位移，用于自适应 alpha
+    let maxDist = 0;
+    for (let i = 0; i < 33; i++) {
+      const kp = rawKeypoints33[i] || [0, 0, 0];
+      const rx = kp[0] ?? kp.x ?? 0;
+      const ry = kp[1] ?? kp.y ?? 0;
+      const dx = rx - this._smooth33Raw[i].x;
+      const dy = ry - this._smooth33Raw[i].y;
+      const d = Math.sqrt(dx * dx + dy * dy);
+      if (d > maxDist) maxDist = d;
+    }
+
+    const alpha =
+      this._smoothAlphaMin +
+      (this._smoothAlphaMax - this._smoothAlphaMin) *
+        Math.min(1, maxDist / this._smoothSpeedThreshold);
+
+    const result = [];
+    for (let i = 0; i < 33; i++) {
+      const kp = rawKeypoints33[i] || [0, 0, 0];
+      const rx = kp[0] ?? kp.x ?? 0;
+      const ry = kp[1] ?? kp.y ?? 0;
+      const rz = kp[2] ?? kp.z ?? 0;
+      this._smooth33Raw[i].x += alpha * (rx - this._smooth33Raw[i].x);
+      this._smooth33Raw[i].y += alpha * (ry - this._smooth33Raw[i].y);
+      this._smooth33Raw[i].z += alpha * (rz - this._smooth33Raw[i].z);
+      result.push([this._smooth33Raw[i].x, this._smooth33Raw[i].y, this._smooth33Raw[i].z]);
+    }
+    return result;
+  }
+
   _applyKeypoints(rawKeypoints, rawVisibility) {
     const normalized = normalizeToCoco17(rawKeypoints, rawVisibility);
     if (!normalized) return false;
@@ -406,6 +495,25 @@ export class PoseTracker {
     return response.json();
   }
 
+  async _postInferFrameKeypoints(keypoints, visibility) {
+    const apiBase = window.APP_CONFIG?.API_BASE || "";
+    const headers = {
+      "Content-Type": "application/json",
+      ...(this.getAuthHeaders?.() || {}),
+    };
+    const response = await fetch(`${apiBase}/pose/infer_frame`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        action_id: this.getActionId(),
+        keypoints: keypoints,
+        visibility: visibility,
+      }),
+    });
+    if (!response.ok) return null;
+    return response.json();
+  }
+
   _emitPoseResult(json, rawKeypoints, rawVisibility) {
     if (this.onPoseResult) {
       this.onPoseResult({
@@ -428,6 +536,108 @@ export class PoseTracker {
     this._startRenderLoop();
     if (!this.backendMode) return;
 
+    // 等待 MediaPipe 就绪后启动前端姿态估计
+    this._startMediaPipeLoop();
+  }
+
+  async _startMediaPipeLoop() {
+    try {
+      await this._mpReady;
+    } catch (err) {
+      // MediaPipe 不可用，回退到旧的 Base64 → 服务端 ONNX 路径
+      console.warn("MediaPipe 不可用，使用服务端 ONNX 回退方案");
+      this._startServerOnnxLoop();
+      return;
+    }
+
+    const sendIntervalMs = (window.APP_CONFIG && window.APP_CONFIG.POSE_SEND_INTERVAL_MS) || 100;
+    let lastSendTs = 0;
+    let lastVideoTime = -1;
+
+    const detectLoop = () => {
+      if (!this.running) return;
+
+      try {
+        if (this.video.readyState >= 2) {
+          // 仅在视频帧时间戳变化时才执行检测（避免重复处理同一帧）
+          const videoTime = this.video.currentTime;
+          if (videoTime !== lastVideoTime) {
+            lastVideoTime = videoTime;
+            this.resizeCanvas();
+
+            // ---------- 前端 MediaPipe 姿态估计 ----------
+            // 使用 performance.now() 作为时间戳（MediaPipe 官方推荐）
+            const nowMs = performance.now();
+            const result = _mpPoseLandmarker.detectForVideo(this.video, nowMs);
+            const landmarks = result?.landmarks?.[0];
+
+            if (landmarks && landmarks.length >= 33) {
+              // MediaPipe 返回 33 个归一化关键点 [x, y, z, visibility]
+              const keypoints = [];
+              const visibility = [];
+              for (let i = 0; i < 33; i++) {
+                const lm = landmarks[i];
+                keypoints.push([lm.x, lm.y, lm.z ?? 0]);
+                visibility.push(lm.visibility ?? 1);
+              }
+
+              // ---------- 自适应 EMA 抗抖动 ----------
+              const smoothed33 = this._smoothKeypoints33(keypoints);
+
+              // 本地渲染骨架（使用平滑后的关键点）
+              this._applyKeypoints(smoothed33, visibility);
+
+              // ---------- 发送关键点到后端获取反馈/评分 ----------
+              if (nowMs - lastSendTs >= sendIntervalMs) {
+                lastSendTs = nowMs;
+                this._sendKeypointsToBackend(smoothed33, visibility, nowMs);
+              }
+            } else {
+              // 无人检测到时重置平滑状态，避免下次出现时漂移
+              this._smooth33Raw = null;
+            }
+          }
+        }
+      } catch (err) {
+        // MediaPipe 运行时出错不中断循环
+        console.warn("MediaPipe detect 出错:", err);
+      }
+
+      // requestAnimationFrame 比 requestVideoFrameCallback 更稳定
+      // rVFC 在某些浏览器/场景下可能不触发（如 video 被遮挡或暂停）
+      requestAnimationFrame(detectLoop);
+    };
+
+    detectLoop();
+  }
+
+  async _sendKeypointsToBackend(keypoints, visibility, now) {
+    try {
+      const json = await this._postInferFrameKeypoints(keypoints, visibility);
+      if (json) {
+        // 摄像头画面仅显示骨架，不绘制 AR 文字叠层
+        this.lastArOverlay = null;
+        // 更新反馈/评分（骨架已在 MediaPipe 回调中渲染）
+        if (this.onPoseResult) {
+          this.onPoseResult({
+            keypoints,
+            visibility,
+            feedback: json.feedback,
+            score: json.score,
+            status: json.status,
+            voice_cue: json.voice_cue,
+            ar_overlay: json.ar_overlay,
+            skeleton_3d: json.skeleton_3d,
+          });
+        }
+      }
+    } catch (err) {
+      // 后端请求失败不影响本地渲染
+    }
+  }
+
+  /** 旧版回退：Base64 图片 → 服务端 ONNX 推理 */
+  _startServerOnnxLoop() {
     const sendInterval = (window.APP_CONFIG && window.APP_CONFIG.POSE_SEND_INTERVAL_MS) || 100;
     const loopBackend = async () => {
       if (!this.running) return;
@@ -459,7 +669,7 @@ export class PoseTracker {
               json = await this._postInferPose(dataUrl);
               if (json) this.lastArOverlay = null;
             } else {
-              this.lastArOverlay = json.ar_overlay || null;
+              this.lastArOverlay = null;
             }
 
             if (json) {

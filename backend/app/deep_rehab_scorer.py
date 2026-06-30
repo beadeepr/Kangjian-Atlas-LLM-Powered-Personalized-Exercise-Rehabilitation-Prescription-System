@@ -153,8 +153,11 @@ class DeepRehabScorer:
         # 评分缓存: action_id → (score, feedback, timestamp)
         self._cached: dict[str, tuple[int, list[str], float]] = {}
 
-        # 推理间隔（帧数）：每 30 帧触发一次模型推理
+        # 推理间隔（帧数）：缓冲区满后每 N 帧触发一次模型推理
         self._inference_interval: int = 30
+
+        # 每个 action 的累计帧数计数（不受 deque maxlen 限制）
+        self._total_frames: dict[str, int] = {}
 
         self._buffer_lock: threading.Lock = threading.Lock()
         self._initialized = True
@@ -232,16 +235,14 @@ class DeepRehabScorer:
     def buffer_frame(self, action_id: str, keypoints_mp33: list[list[float]]) -> bool:
         """将一帧姿态数据加入指定动作的缓冲区。
 
-        当缓冲区达到 300 帧（完整序列），或每 accumulation_interval 帧时，
-        自动触发一次模型推理。
+        推理只在缓冲区累计 ≥ 300 帧后才开始触发，之后每 30 帧更新一次。
+        在此之前返回「AI 评分中…」占位提示，确保模型输入序列包含完整动作。
 
         Returns
         -------
         bool
-            True 表示该帧触发了模型推理。
+            True 表示该帧已被加入缓冲区（调用者不应重复缓冲）。
         """
-        if not self.is_ready:
-            return False
         if action_id not in ML_ACTIONS:
             return False
 
@@ -251,18 +252,22 @@ class DeepRehabScorer:
 
             coco = self._extract_coco17(keypoints_mp33)
             self._buffers[action_id].append(coco)
-            buf_len = len(self._buffers[action_id])
 
-        # 触发条件：缓冲区满 或 满足采样间隔
-        if buf_len == TARGET_LENGTH or (buf_len >= self._inference_interval and buf_len % self._inference_interval == 0):
+            # 累计帧数不受 deque maxlen 限制
+            total = self._total_frames.get(action_id, 0) + 1
+            self._total_frames[action_id] = total
+
+        # 仅在模型就绪且缓冲区达到满长度后触发推理，之后每 N 帧更新一次
+        if self.is_ready and total >= TARGET_LENGTH and (total - TARGET_LENGTH) % self._inference_interval == 0:
             self._run_inference(action_id)
-            return True
-        return False
+        return True  # 帧已成功缓冲
 
     def buffer_frame_coco17(self, action_id: str, keypoints_coco17: list[list[float]]) -> bool:
-        """Buffer a COCO-17 frame (from /correct_pose or browser pose pipeline)."""
-        if not self.is_ready:
-            return False
+        """Buffer a COCO-17 frame (from /correct_pose or browser pose pipeline).
+
+        Same trigger policy as buffer_frame: no inference before 300 frames,
+        then every N frames thereafter.
+        """
         if action_id not in ML_ACTIONS:
             return False
 
@@ -270,12 +275,13 @@ class DeepRehabScorer:
             if action_id not in self._buffers:
                 self._buffers[action_id] = deque(maxlen=TARGET_LENGTH)
             self._buffers[action_id].append(self._coco17_array(keypoints_coco17))
-            buf_len = len(self._buffers[action_id])
 
-        if buf_len == TARGET_LENGTH or (buf_len >= self._inference_interval and buf_len % self._inference_interval == 0):
+            total = self._total_frames.get(action_id, 0) + 1
+            self._total_frames[action_id] = total
+
+        if self.is_ready and total >= TARGET_LENGTH and (total - TARGET_LENGTH) % self._inference_interval == 0:
             self._run_inference(action_id)
-            return True
-        return False
+        return True  # 帧已成功缓冲
 
     # ------------------------------------------------------------------
     # 模型推理
@@ -374,15 +380,20 @@ class DeepRehabScorer:
     # ------------------------------------------------------------------
 
     def reset_action(self, action_id: str) -> None:
-        """重置指定动作的缓冲区和缓存。"""
+        """重置指定动作的缓冲区、缓存和帧计数。"""
         with self._buffer_lock:
             self._buffers.pop(action_id, None)
             self._cached.pop(action_id, None)
+            self._total_frames.pop(action_id, None)
 
     def buffer_size(self, action_id: str) -> int:
         with self._buffer_lock:
             buf = self._buffers.get(action_id)
         return len(buf) if buf else 0
+
+    def total_frames(self, action_id: str) -> int:
+        with self._buffer_lock:
+            return self._total_frames.get(action_id, 0)
 
 
 # ============================================================================

@@ -16,4 +16,4 @@ qdrant-client
 onnxruntime
 opencv-python-headless
 aiortc
-tensorflow-cpu  # DeepRehabPile 模型推理（Windows 仅支持 CPU 版本）
+tensorflow-cpu  

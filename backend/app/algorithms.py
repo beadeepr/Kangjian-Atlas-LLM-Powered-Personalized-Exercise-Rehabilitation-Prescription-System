@@ -165,7 +165,7 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
     required = required_map.get(action_id, list(range(min(17, len(visibility)))))
     missing = []
     for index in required:
-        if index >= len(visibility) or visibility[index] < 0.8:
+        if index >= len(visibility) or visibility[index] < 0.1:
             missing.append(KEYPOINT_NAMES.get(index, f"关键点{index}"))
     if not missing:
         return None
@@ -414,9 +414,23 @@ def _check_ml_action(keypoints: list[list[float]], action_id: str) -> dict[str, 
         return result
 
     # 模型尚未产生结果：提示正在进行 AI 评估
-    buf_size = scorer.buffer_size(action_id)
+    total = scorer.total_frames(action_id)
+    remaining = max(0, 300 - total)
+
+    if not scorer.is_ready:
+        return {
+            "feedback": [f"AI 模型未加载，请检查模型文件。已采集 {total} 帧。"],
+            "score": 0,
+            "status": "error",
+        }
+    if remaining > 0:
+        return {
+            "feedback": [f"AI 动作评估中… 已采集 {total} 帧（还需 {remaining} 帧），请继续完成动作。"],
+            "score": 0,
+            "status": "warning",
+        }
     return {
-        "feedback": [f"AI 动作评估中… 已采集 {buf_size} 帧，请继续完成动作。"],
+        "feedback": [f"AI 动作评估中… 已采集 {total} 帧，评分即将更新。"],
         "score": 0,
         "status": "warning",
     }

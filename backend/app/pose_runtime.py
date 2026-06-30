@@ -280,8 +280,7 @@ class PoseStreamManager:
 
         ml_buffered = False
         if frame.action_id in ML_ACTIONS:
-            get_scorer().buffer_frame(frame.action_id, inference["keypoints"])
-            ml_buffered = True
+            ml_buffered = get_scorer().buffer_frame(frame.action_id, inference["keypoints"])
 
         coco_keypoints, coco_visibility = _normalize_to_coco17(
             inference["keypoints"],

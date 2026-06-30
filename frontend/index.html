@@ -6,7 +6,7 @@
     <meta name="description" content="康健图谱 — 个性化运动康复处方生成系统" />
     <title>康健图谱 - 个性化运动康复处方</title>
     <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="style.css?v=20260627k" />
+    <link rel="stylesheet" href="style.css?v=20260630d" />
   </head>
   <body>
     <header class="app-header">
@@ -534,6 +534,7 @@
           <div class="video-shell" id="video-shell">
             <video id="video" autoplay playsinline muted></video>
             <canvas id="overlay" width="640" height="480"></canvas>
+            <div class="score-badge" id="score-badge">-- 分</div>
             <div class="video-placeholder" id="video-placeholder">
               <p>准备开始跟练</p>
               <p class="hint">请先查看动作参考，准备好后点击「启动摄像头」</p>
@@ -542,7 +543,6 @@
               <span class="camera-loading-spinner" aria-hidden="true"></span>
               <p id="camera-loading-text">正在准备…</p>
             </div>
-            <div class="score-badge" id="score-badge">-- 分</div>
           </div>
 
           <aside class="training-side">
@@ -685,8 +685,8 @@
       <button class="toast-close" id="toast-close" type="button" aria-label="关闭通知">×</button>
     </div>
 
-    <script src="config.js?v=20260629b"></script>
-    <script src="mock.js?v=20260629b"></script>
-    <script type="module" src="app.js?v=20260629b"></script>
+    <script src="config.js?v=20260630d"></script>
+    <script src="mock.js?v=20260630d"></script>
+    <script type="module" src="app.js?v=20260630d"></script>
   </body>
 </html>

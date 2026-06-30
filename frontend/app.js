@@ -1,4 +1,4 @@
-import { PoseTracker } from "./pose.js?v=20260629b";
+import { PoseTracker } from "./pose.js?v=20260630e";
 import {
   escapeHtml,
   escapeAdminText,
@@ -2026,9 +2026,7 @@ function updatePoseFeedback(result) {
   if (typeof score === "number") {
     state.trainingLastScore = score;
   }
-  const latest = feedback?.[0] || "暂无反馈";
 
-  if (els.feedbackOverlay) els.feedbackOverlay.textContent = latest;
   els.scoreBadge.textContent = `${score ?? "--"} 分`;
   els.statusText.textContent =
     status === "ok"
