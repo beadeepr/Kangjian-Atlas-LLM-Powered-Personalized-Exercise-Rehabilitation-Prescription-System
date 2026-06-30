@@ -25,7 +25,7 @@ function enrichAction(action) {
     progression: action.progression ?? catalog?.progression ?? "",
     regression: action.regression ?? catalog?.regression ?? "",
     category: action.category ?? "",
-    difficulty_level: action.difficulty_level ?? "初级",
+    difficulty_level: action.difficulty_level ?? catalog?.difficulty_level ?? "初级",
     stage: action.stage ?? "",
     target_muscles: action.target_muscles ?? [],
     equipment: action.equipment ?? [],

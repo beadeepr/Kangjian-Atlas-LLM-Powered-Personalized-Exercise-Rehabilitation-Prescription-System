@@ -28,32 +28,39 @@ def build_error_comparisons(action: ActionItem) -> list[dict[str, str]]:
 
 
 def build_difficulty_profiles(action: ActionItem) -> list[dict[str, Any]]:
-    base_sets = action.sets or 1
-    base_reps = action.reps or 1
-    beginner_sets = max(1, base_sets - 1)
-    beginner_reps = max(1, base_reps - 2)
-    advanced_sets = min(20, base_sets + 1)
-    advanced_reps = min(200, base_reps + 2)
+    base_sets = action.sets or 3
+    base_reps = action.reps or 10
+    recommended = action.difficulty_level or "中级"
+    level_offset = {"初级": -1, "中级": 0, "高级": 1}
+    rec_offset = level_offset.get(recommended, 0)
+
+    def profile_sets(level: str) -> int:
+        offset = level_offset[level] - rec_offset
+        return max(1, min(20, base_sets + offset))
+
+    def profile_reps(level: str) -> int:
+        offset = level_offset[level] - rec_offset
+        return max(1, min(200, base_reps + offset * 2))
 
     return [
         {
             "level": "初级",
-            "sets": beginner_sets,
-            "reps": beginner_reps,
+            "sets": profile_sets("初级"),
+            "reps": profile_reps("初级"),
             "tempo": "慢速，动作幅度控制在无痛范围内。",
             "guidance": action.regression or "先缩小动作幅度，确认无明显疼痛后再完成标准次数。",
         },
         {
             "level": "中级",
-            "sets": base_sets,
-            "reps": base_reps,
+            "sets": profile_sets("中级"),
+            "reps": profile_reps("中级"),
             "tempo": "按标准动作节奏完成，注意呼吸和关节对线。",
             "guidance": action.description or action.note or "按标准动作完成训练。",
         },
         {
             "level": "高级",
-            "sets": advanced_sets,
-            "reps": advanced_reps,
+            "sets": profile_sets("高级"),
+            "reps": profile_reps("高级"),
             "tempo": "保持动作质量后再增加保持时间、次数或轻阻力。",
             "guidance": action.progression or "连续训练无疼痛加重后，逐步增加训练量。",
         },

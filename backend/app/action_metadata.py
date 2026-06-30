@@ -30,6 +30,39 @@ CATEGORY_BY_ID = {
     "elbow_flexion_right": "活动度训练",
 }
 
+# 按动作逐条划分推荐难度（优先于类别默认值）
+DIFFICULTY_BY_ID = {
+    # 初级 — 入门：低协调、低负荷、早期恢复与被动/等长类
+    "neck_chin_tuck": "初级",
+    "chin_tuck": "初级",
+    "neck_side_bend": "初级",
+    "ankle_pump": "初级",
+    "quad_set": "初级",
+    "shoulder_pendulum": "初级",
+    "calf_stretch": "初级",
+    "pelvic_tilt": "初级",
+    "cat_cow": "初级",
+    # 中级 — 标准：中等控制、常规活动度与基础力量
+    "thoracic_extension": "中级",
+    "scapular_retraction": "中级",
+    "lifting_of_arms": "中级",
+    "shoulder_abduction_left": "中级",
+    "shoulder_abduction_right": "中级",
+    "shoulder_flexion_left": "中级",
+    "shoulder_flexion_right": "中级",
+    "shoulder_forward_elevation": "中级",
+    "elbow_flexion_left": "中级",
+    "elbow_flexion_right": "中级",
+    "glute_bridge": "中级",
+    # 高级 — 进阶：平衡、阻力、多关节协调或较大负荷
+    "shoulder_external_rotation": "高级",
+    "bird_dog": "高级",
+    "dead_bug": "高级",
+    "wall_squat": "高级",
+    "straight_leg_raise": "高级",
+    "mckenzie_press_up": "高级",
+}
+
 DIFFICULTY_BY_CATEGORY = {
     "姿势矫正": "初级",
     "拉伸训练": "初级",
@@ -124,7 +157,12 @@ def enrich_action_payload(payload: dict) -> dict:
     action_id = action.get("id") or "exercise_generic"
     regions = _as_list(action.get("body_regions"))
     category = action.get("category") or CATEGORY_BY_ID.get(action_id) or "康复训练"
-    difficulty = action.get("difficulty_level") or DIFFICULTY_BY_CATEGORY.get(category) or "初级"
+    difficulty = (
+        action.get("difficulty_level")
+        or DIFFICULTY_BY_ID.get(action_id)
+        or DIFFICULTY_BY_CATEGORY.get(category)
+        or "初级"
+    )
     image = action.get("image") or f"assets/actions/{action_id}.png"
     video_url = action.get("video_url") or ""
 

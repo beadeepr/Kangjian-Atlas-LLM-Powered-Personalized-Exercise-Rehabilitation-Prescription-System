@@ -2807,6 +2807,36 @@ function bindEvents() {
   });
 }
 
+function canRestoreStep(step) {
+  const loggedInSteps = new Set([
+    "intake",
+    "prescription",
+    "history",
+    "profiles",
+    "library",
+    "progress",
+    "knowledge",
+    "collaboration",
+    "doctor",
+    "admin",
+    "demo",
+    "training",
+  ]);
+  if (!loggedInSteps.has(step)) return false;
+
+  if (step === "admin") return state.currentUser?.role === "admin";
+  if (step === "doctor") {
+    return state.currentUser?.role === "doctor" || state.currentUser?.role === "admin";
+  }
+
+  const needsPrescription = new Set(["prescription", "demo", "training", "collaboration"]);
+  if (needsPrescription.has(step) && !state.prescription) return false;
+
+  if ((step === "demo" || step === "training") && !state.currentAction) return false;
+
+  return true;
+}
+
 function restoreSessionState() {
   if (!isSessionReady()) return false;
 
@@ -2814,18 +2844,24 @@ function restoreSessionState() {
   const savedStep = sessionStorage.getItem(sessionKey("kj_current_step"));
   const savedFormData = loadFormDataFromSession();
 
-  if (savedPrescription && savedStep) {
+  if (savedPrescription) {
     state.prescription = savedPrescription;
     renderPrescription(savedPrescription);
     renderPrescriptionRecap(savedFormData);
     updatePrescriptionExportBar();
     updatePrescriptionFeedbackCard();
+  }
 
-    const validSteps = ["prescription", "history", "intake"];
-    const targetStep = validSteps.includes(savedStep) ? savedStep : "prescription";
-    goToStep(targetStep);
+  if (savedStep && canRestoreStep(savedStep)) {
+    goToStep(savedStep);
     return true;
   }
+
+  if (state.prescription) {
+    goToStep("prescription");
+    return true;
+  }
+
   return false;
 }
 
