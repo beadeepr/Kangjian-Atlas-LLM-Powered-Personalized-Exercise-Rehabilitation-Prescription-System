@@ -216,31 +216,32 @@
           <div class="field field-full intake-section-wrap" id="imaging-section-wrap">
             <details class="intake-collapsible" id="imaging-collapsible">
               <summary class="intake-collapsible-summary">
-                <span class="intake-collapsible-title">影像报告上传</span>
+                <span class="intake-collapsible-title">报告上传</span>
                 <span class="intake-collapsible-meta optional-tag">可选</span>
               </summary>
               <div class="intake-collapsible-body" id="imaging-section">
-                <p class="hint">支持上传文本报告（.txt/.md）自动提取内容；图片/PDF 将保存并标记待 OCR。系统会自动识别红旗症状。</p>
+                <p class="hint">请上传医学检查报告（txt / md / pdf / docx）或粘贴诊断结论；系统将自动分析内容。图片仅存档，建议同时粘贴文字。单文件不超过 5MB。</p>
                 <div class="imaging-form-grid">
                   <label>报告类型
                     <select id="imaging-report-type" aria-label="报告类型">
-                      <option value="MRI">MRI</option>
-                      <option value="X光">X光</option>
-                      <option value="CT">CT</option>
-                      <option value="其他">其他</option>
+                      <option value="MRI报告">MRI报告</option>
+                      <option value="X光报告">X光报告</option>
+                      <option value="CT报告">CT报告</option>
+                      <option value="其他报告">其他报告</option>
                     </select>
                   </label>
                   <label>上传文件
-                    <input id="imaging-file" type="file" accept=".txt,.md,.text/plain" />
+                    <input id="imaging-file" type="file" accept=".txt,.md,.pdf,.docx,.png,.jpg,.jpeg,text/plain,application/pdf" />
                   </label>
                   <label class="imaging-text-label">或粘贴报告文本
-                    <textarea id="imaging-ocr-text" rows="3" placeholder="可直接粘贴影像报告关键结论…"></textarea>
+                    <textarea id="imaging-ocr-text" rows="3" placeholder="可直接粘贴检查报告关键结论…"></textarea>
                   </label>
                   <label>备注
                     <input id="imaging-note" type="text" placeholder="可选" />
                   </label>
                 </div>
                 <button class="btn btn-secondary btn-small" id="upload-imaging-report" type="button">上传并分析</button>
+                <p class="hint imaging-upload-note" id="imaging-upload-note" hidden></p>
                 <div class="imaging-reports-list" id="imaging-reports-list"></div>
               </div>
             </details>

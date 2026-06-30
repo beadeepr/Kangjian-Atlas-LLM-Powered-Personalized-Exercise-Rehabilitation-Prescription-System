@@ -16,4 +16,6 @@ qdrant-client
 onnxruntime
 opencv-python-headless
 aiortc
-tensorflow-cpu  
+tensorflow-cpu
+pypdf
+python-docx

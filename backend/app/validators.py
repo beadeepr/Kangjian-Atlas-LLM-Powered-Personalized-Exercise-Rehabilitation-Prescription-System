@@ -114,6 +114,52 @@ def _is_rehab_related(text: str) -> bool:
     return False
 
 
+_NON_MEDICAL_REPORT_HINTS = (
+    "菜谱", "烹饪", "天气预报", "购物节", "快递已发货", "版权声明",
+    "转载请注明", "本文来自", "Figure", "Recipe",
+)
+
+_REPORT_DOC_HINTS = (
+    "MRI", "CT", "X线", "X光", "磁共振", "超声", "B超", "DR", "MR", "扫描", "摄片",
+    "诊断", "影像所见", "检查所见", "影像", "所见", "印象", "病理",
+    "临床", "患者", "医院", "科室", "检验", "化验", "复查",
+    "椎间盘", "关节", "骨折", "脱位", "积液", "狭窄", "突出",
+    "退变", "损伤", "炎症", "阳性", "阴性", "未见明显异常", "建议结合临床",
+)
+
+_WEAK_REPORT_HINTS = frozenset({"报告", "提示", "意见", "检查", "结论"})
+
+
+def _is_medical_report_like(text: str) -> bool:
+    if any(hint in text for hint in _REPORT_DOC_HINTS):
+        return True
+    weak_hits = sum(1 for hint in _WEAK_REPORT_HINTS if hint in text)
+    if weak_hits >= 2:
+        return True
+    if weak_hits >= 1 and any(len(hint) >= 2 and hint in text for hint in _MEDICAL_HINTS):
+        return True
+    return False
+
+
+def validate_imaging_report_content(text: str) -> str | None:
+    cleaned = (text or "").strip()
+    if not cleaned:
+        return None
+
+    non_medical_hits = sum(1 for hint in _NON_MEDICAL_REPORT_HINTS if hint in cleaned)
+    medical_like = _is_medical_report_like(cleaned)
+    if non_medical_hits >= 1 and not medical_like:
+        return "上传内容似乎不是医学检查报告，请上传正规检查报告或粘贴关键诊断结论。"
+
+    if len(cleaned) >= 20 and not medical_like:
+        return "未识别到医学检查报告相关内容，请确认文件是否正确，或直接粘贴诊断结论。"
+
+    if len(cleaned) < 20 and not medical_like:
+        return "报告内容过短且缺少医学检查相关信息，请补充诊断结论或更换正确文件。"
+
+    return None
+
+
 def validate_pain_regions(pain_regions: Optional[List[str]]) -> str | None:
     if not pain_regions:
         return "请至少选择一个疼痛部位"

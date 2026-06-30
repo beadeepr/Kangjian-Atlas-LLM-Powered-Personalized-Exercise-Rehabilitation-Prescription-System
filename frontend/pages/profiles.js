@@ -16,6 +16,14 @@
 //   updateMobilityGuide(),
 //   goToStep(step)
 
+import {
+  formatImagingOcrStatus,
+  formatImagingRiskLevel,
+  imagingReportPreview,
+  imagingRiskClass,
+  imagingUploadSuccessMessage,
+} from "../shared/imaging.js";
+
 export function createProfilesPage(ctx) {
   const {
     state,
@@ -209,12 +217,12 @@ export function createProfilesPage(ctx) {
   }
 
   function renderImagingReportCard(report) {
-    const riskClass = report.risk_level === "high" ? "risk-high" : "";
-    const ocrText = report.ocr_text || "";
+    const riskClass = imagingRiskClass(report.risk_level);
+    const preview = imagingReportPreview(report);
     const uniqueFlags = (report.red_flags || []).filter((item, index, list) => {
       const label = item.label || "";
       if (!label) return false;
-      if (ocrText.includes(label)) return false;
+      if (preview.includes(label)) return false;
       return list.findIndex((other) => other.label === label) === index;
     });
     const flags = uniqueFlags
@@ -223,25 +231,33 @@ export function createProfilesPage(ctx) {
     const createdAt = report.created_at
       ? escapeAdminText(String(report.created_at).slice(0, 19).replace("T", " "))
       : "";
+    const statusLabel = formatImagingOcrStatus(report.ocr_status);
+    const riskLabel = formatImagingRiskLevel(report.risk_level);
+    const summaryBlock = preview
+      ? `<p class="imaging-summary-label">${report.summary ? "分析摘要" : "内容预览"}</p>
+         <p class="imaging-ocr-text">${escapeAdminText(preview.slice(0, 280))}${preview.length > 280 ? "…" : ""}</p>`
+      : `<p class="hint">暂无可用文字，请补充诊断结论或上传含文字层的 pdf/docx。</p>`;
+    const rejectReason = report.reject_reason || report.analysis_note;
     return `
       <article class="imaging-report-card ${riskClass}" data-report-id="${report.id}">
         <div class="imaging-report-head">
           <div>
-            <strong>${escapeAdminText(report.report_type || "影像报告")}</strong>
+            <strong>${escapeAdminText(report.report_type || "报告")}</strong>
             ${report.file_name ? ` · ${escapeAdminText(report.file_name)}` : ""}
             ${createdAt ? `<span class="hint"> · ${createdAt}</span>` : ""}
           </div>
           <button class="btn btn-secondary btn-small imaging-delete-btn" type="button" data-report-id="${report.id}">删除</button>
         </div>
-        <p class="hint">OCR：${escapeAdminText(report.ocr_status)} · 风险：${escapeAdminText(report.risk_level)}</p>
-        ${ocrText ? `<p class="imaging-ocr-text">${escapeAdminText(ocrText.slice(0, 220))}${ocrText.length > 220 ? "…" : ""}</p>` : ""}
+        <p class="hint">分析状态：${escapeAdminText(statusLabel)} · 风险：${escapeAdminText(riskLabel)}</p>
+        ${rejectReason ? `<p class="hint imaging-reject-reason">${escapeAdminText(rejectReason)}</p>` : ""}
+        ${summaryBlock}
         ${flags ? `<ul class="red-flag-list imaging-flag-list">${flags}</ul>` : ""}
       </article>`;
   }
 
   async function deleteImagingReport(reportId) {
     if (!requireApi()) return;
-    if (!window.confirm("确定删除该影像报告记录？")) return;
+    if (!window.confirm("确定删除该报告记录？")) return;
     const response = await fetchWithTimeout(
       `${window.APP_CONFIG.API_BASE}/imaging_reports/${reportId}`,
       { method: "DELETE", headers: authHeaders() },
@@ -251,7 +267,7 @@ export function createProfilesPage(ctx) {
       showErrorToast("删除失败");
       return;
     }
-    showToast("影像报告已删除");
+    showToast("报告已删除");
     await loadImagingReports();
   }
 
@@ -285,13 +301,13 @@ export function createProfilesPage(ctx) {
         return true;
       });
       if (!state.imagingReports.length) {
-        els.imagingReportsList.innerHTML = "<p class=\"hint\">暂无影像报告记录。</p>";
+        els.imagingReportsList.innerHTML = "<p class=\"hint\">暂无报告记录。</p>";
         return;
       }
       els.imagingReportsList.innerHTML = state.imagingReports.map(renderImagingReportCard).join("");
     } catch {
       renderLoadError(els.imagingReportsList, {
-        message: "影像报告加载失败，请确认后端已启动后重试。",
+        message: "报告加载失败，请确认后端已启动后重试。",
         onRetry: loadImagingReports,
       });
     }
@@ -300,13 +316,30 @@ export function createProfilesPage(ctx) {
   async function uploadImagingReport() {
     if (!requireApi()) return;
     const fileInput = document.getElementById("imaging-file");
+    const uploadButton = document.getElementById("upload-imaging-report");
+    const uploadNote = document.getElementById("imaging-upload-note");
     const ocrText = document.getElementById("imaging-ocr-text")?.value.trim();
     const note = document.getElementById("imaging-note")?.value.trim();
-    const reportType = document.getElementById("imaging-report-type")?.value || "影像报告";
+    const reportType = document.getElementById("imaging-report-type")?.value || "其他报告";
     const file = fileInput?.files?.[0];
 
+    if (uploadNote) {
+      uploadNote.hidden = true;
+      uploadNote.textContent = "";
+    }
+
     if (!file && !ocrText) {
-      showToast("请上传文本报告或粘贴报告内容");
+      showToast("请上传报告文件或粘贴报告内容");
+      return;
+    }
+
+    if (file && !window.APP_CONFIG.IMAGING_ALLOWED_FILE_PATTERN.test(file.name)) {
+      showToast("支持 txt、md、pdf、docx 及 png/jpg 图片（旧版 .doc 请另存为 docx 或 pdf）");
+      return;
+    }
+
+    if (file && file.size > window.APP_CONFIG.IMAGING_MAX_FILE_BYTES) {
+      showErrorToast("文件不能超过 5MB，请压缩或截取关键页后重试");
       return;
     }
 
@@ -326,12 +359,13 @@ export function createProfilesPage(ctx) {
       });
       payload.file_name = file.name;
       payload.file_content_base64 = btoa(binary);
-      if (!ocrText && /\.(txt|md)$/i.test(file.name)) {
+      if (!ocrText && window.APP_CONFIG.IMAGING_CLIENT_TEXT_FILE_PATTERN.test(file.name)) {
         payload.ocr_text = await file.text();
       }
     }
 
-    setLoading(true, "正在上传并分析影像报告…");
+    if (uploadButton) uploadButton.disabled = true;
+    setLoading(true, "正在上传并分析报告，请稍候…");
     try {
       const response = await fetchWithTimeout(
         `${window.APP_CONFIG.API_BASE}/imaging_reports`,
@@ -340,25 +374,31 @@ export function createProfilesPage(ctx) {
           headers: authHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(payload),
         },
-        window.APP_CONFIG.LIST_TIMEOUT_MS
+        window.APP_CONFIG.IMAGING_UPLOAD_TIMEOUT_MS
       );
       if (!response.ok) {
         const detail = await parseApiError(response);
         showErrorToast(detail || "上传失败");
+        if (uploadNote && detail) {
+          uploadNote.hidden = false;
+          uploadNote.textContent = detail;
+        }
         return;
       }
       const report = await response.json();
       if (report.red_flags?.length) {
-        showRedFlagAlert("影像报告检测到红旗症状，建议尽快就医评估。", report.red_flags);
+        showRedFlagAlert("报告检测到红旗症状，建议尽快就医评估。", report.red_flags);
       }
-      showToast("影像报告已上传");
+      showToast(imagingUploadSuccessMessage(report));
       if (fileInput) fileInput.value = "";
       document.getElementById("imaging-ocr-text").value = "";
       document.getElementById("imaging-note").value = "";
       await loadImagingReports();
-    } catch {
-      showErrorToast("影像报告上传失败");
+    } catch (error) {
+      const isTimeout = error?.name === "AbortError";
+      showErrorToast(isTimeout ? "报告分析超时，请稍后重试或粘贴较短文本" : "报告上传失败");
     } finally {
+      if (uploadButton) uploadButton.disabled = false;
       setLoading(false);
     }
   }
