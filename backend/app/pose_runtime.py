@@ -273,6 +273,9 @@ class PoseStreamManager:
 
     def close_session(self, session_id: str):
         self.sessions.pop(session_id, None)
+        # 重置算法评分的时序平滑状态
+        from .algorithms import reset_smooth_state
+        reset_smooth_state()  # 清除所有动作的评分平滑记忆
 
     async def process_frame(self, frame: PoseFrame, session: PoseStreamSession | None = None) -> dict[str, Any]:
         started = time.perf_counter()

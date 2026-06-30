@@ -1,10 +1,11 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from typing import Any
 
 import numpy as np
 
 from .deep_rehab_scorer import ML_ACTIONS, get_scorer
+
 
 COCO_KEYPOINTS = {
     "nose": 0,
@@ -50,8 +51,100 @@ def midpoint(p1: list[float], p2: list[float]) -> list[float]:
     return [(p1[i] + p2[i]) / 2 for i in range(3)]
 
 
-def _score_response(feedback: list[str], score: int) -> dict[str, Any]:
+# ========================================================================
+# 连续评分 & 时序平滑 工具函数
+# ========================================================================
+
+def _clamp(v: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, v))
+
+
+def _lerp(a: float, b: float, t: float) -> float:
+    """t in [0, 1]; 返回 a + (b-a)*t"""
+    return a + (b - a) * t
+
+
+def _linear_map(
+    value: float,
+    best: float,
+    worst: float,
+    best_score: float = 95.0,
+    worst_score: float = 30.0,
+) -> float:
+    """将测量值线性映射为连续分数。best -> best_score, worst -> worst_score。
+
+    对于「越小越好」的指标 (如距离): best < worst
+    对于「越大越好」的指标 (如角度): best > worst
+    """
+    if abs(worst - best) < 1e-9:
+        return best_score
+    ratio = _clamp((value - best) / (worst - best), 0.0, 1.0)
+    return _lerp(best_score, worst_score, ratio)
+
+
+def _range_score(
+    value: float,
+    opt_lo: float,
+    opt_hi: float,
+    bad_lo: float,
+    bad_hi: float,
+    max_score: float = 95.0,
+    min_score: float = 30.0,
+) -> float:
+    """区间评分：值在 [opt_lo, opt_hi] 内得 max_score，
+    偏离到 [bad_lo, bad_hi] 时线性衰减至 min_score。
+    """
+    if opt_lo <= value <= opt_hi:
+        return max_score
+    if value < opt_lo:
+        if opt_lo <= bad_lo:
+            return min_score
+        ratio = _clamp((opt_lo - value) / (opt_lo - bad_lo), 0.0, 1.0)
+    else:
+        if bad_hi <= opt_hi:
+            return min_score
+        ratio = _clamp((value - opt_hi) / (bad_hi - opt_hi), 0.0, 1.0)
+    return _lerp(max_score, min_score, ratio)
+
+
+# ---------- 时序平滑 ----------
+
+# {action_id: smoothed_score}
+_smooth_state: dict[str, float] = {}
+_SMOOTH_ALPHA: float = 0.35  # EMA 系数（约 3 帧收敛）
+
+
+def _smooth_score(raw_score: float, action_id: str) -> int:
+    """对原始评分做 EMA 时序平滑，消除逐帧抖动。"""
+    prev = _smooth_state.get(action_id, raw_score)
+    smoothed = prev + _SMOOTH_ALPHA * (raw_score - prev)
+    _smooth_state[action_id] = smoothed
+    return max(0, min(100, int(round(smoothed))))
+
+
+def reset_smooth_state(action_id: str | None = None) -> None:
+    """重置时序平滑状态。action_id 为 None 时全部清除。"""
+    global _smooth_state
+    if action_id is None:
+        _smooth_state.clear()
+    else:
+        _smooth_state.pop(action_id, None)
+
+
+# ---------- 评分响应 ----------
+
+def _score_response(feedback: list[str], score: int, *, action_id: str = "") -> dict[str, Any]:
+    """生成统一评分响应（含时序平滑与状态判定）。
+
+    Parameters
+    ----------
+    feedback : 反馈消息列表。
+    score : 原始整数分数 [0, 100]。
+    action_id : 非空时启用 EMA 平滑。
+    """
     score = max(0, min(100, int(score)))
+    if action_id:
+        score = _smooth_score(float(score), action_id)
     if score >= 80:
         status = "ok"
     elif score >= 45:
@@ -60,6 +153,31 @@ def _score_response(feedback: list[str], score: int) -> dict[str, Any]:
         status = "error"
     return {"feedback": feedback, "score": score, "status": status}
 
+
+def _graded_feedback(
+    score: float,
+    excellent_msg: str,
+    good_msg: str,
+    fair_msg: str,
+    poor_msg: str,
+    *,
+    thr_excellent: float = 88.0,
+    thr_good: float = 72.0,
+    thr_fair: float = 50.0,
+) -> list[str]:
+    """按分数区间选取分级反馈消息。"""
+    if score >= thr_excellent:
+        return [excellent_msg]
+    if score >= thr_good:
+        return [good_msg]
+    if score >= thr_fair:
+        return [fair_msg]
+    return [poor_msg]
+
+
+# ========================================================================
+# 关键点可见性守卫
+# ========================================================================
 
 COCO17_TO_MEDIAPIPE33 = {
     0: 0,
@@ -150,7 +268,7 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
         "ankle_pump": [COCO_KEYPOINTS["left_knee"], COCO_KEYPOINTS["right_knee"], COCO_KEYPOINTS["left_ankle"], COCO_KEYPOINTS["right_ankle"]],
         "shoulder_pendulum": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["left_wrist"], COCO_KEYPOINTS["right_wrist"]],
         "shoulder_external_rotation": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["left_hip"], COCO_KEYPOINTS["right_hip"]],
-        # ---- ML 动作：需要上身关键点 ----
+        # ---- ML 动作 ----
         "lifting_of_arms": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["left_wrist"], COCO_KEYPOINTS["right_wrist"]],
         "shoulder_abduction_left": [COCO_KEYPOINTS["left_shoulder"], COCO_KEYPOINTS["left_elbow"], COCO_KEYPOINTS["left_wrist"], COCO_KEYPOINTS["right_shoulder"]],
         "shoulder_abduction_right": [COCO_KEYPOINTS["right_shoulder"], COCO_KEYPOINTS["right_elbow"], COCO_KEYPOINTS["right_wrist"], COCO_KEYPOINTS["left_shoulder"]],
@@ -169,7 +287,6 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
             missing.append(KEYPOINT_NAMES.get(index, f"关键点{index}"))
     if not missing:
         return None
-
     if len(missing) == len(required):
         return {
             "feedback": [
@@ -178,18 +295,20 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
             "score": 0,
             "status": "error",
         }
-
     if len(missing) == 1:
         message = f"未识别到{missing[0]}，请调整摄像头角度或使该部位更清晰可见。"
     else:
         message = f"未识别到{'、'.join(missing[:-1])}和{missing[-1]}，请调整摄像头角度或使这些部位更清晰可见。"
-
     return {
         "feedback": [message],
         "score": 35,
         "status": "warning",
     }
 
+
+# ========================================================================
+# 核心分析入口
+# ========================================================================
 
 def analyze_pose(
     action_id: str,
@@ -222,7 +341,7 @@ def analyze_pose(
         "ankle_pump": _check_ankle_pump,
         "shoulder_pendulum": _check_shoulder_pendulum,
         "shoulder_external_rotation": _check_shoulder_external_rotation,
-        # ---- DeepRehabPile ML 评分动作 ----
+        # ---- ML ----
         "lifting_of_arms": _check_lifting_of_arms,
         "shoulder_abduction_left": _check_shoulder_abduction_left,
         "shoulder_abduction_right": _check_shoulder_abduction_right,
@@ -238,52 +357,117 @@ def analyze_pose(
     return checker(keypoints)
 
 
+# ========================================================================
+# 16 个算法评分动作 — 连续评分 + 分级反馈
+# ========================================================================
+
+# ---- neck_chin_tuck: 下巴回收训练 ----
+
 def _check_neck_chin_tuck(keypoints: list[list[float]]) -> dict[str, Any]:
+    """下巴回收：鼻子与耳朵 x 距离越小越好。"""
     nose = keypoints[COCO_KEYPOINTS["nose"]]
     ear_mid = midpoint(keypoints[COCO_KEYPOINTS["left_ear"]], keypoints[COCO_KEYPOINTS["right_ear"]])
-    dist_nose_ear_x = abs(nose[0] - ear_mid[0])
-    if dist_nose_ear_x > 0.06:
-        return _score_response(["下巴回收还不够，请像做“双下巴”一样缓慢向后收。"], 72)
-    return _score_response(["下巴回收到位，保持头颈竖直并放松肩部。"], 95)
+    dist = abs(nose[0] - ear_mid[0])
 
+    # 连续评分：0 → 95, 0.06 → 75, 0.15 → 30
+    raw = _linear_map(dist, best=0.0, worst=0.15, best_score=95, worst_score=30)
+
+    feedback = _graded_feedback(
+        raw,
+        "下巴回收到位，头颈竖直，动作非常标准！",
+        "下巴回收良好，可再向后收一点让双下巴更明显。",
+        '下巴回收不够，请像做\u201c双下巴\u201d一样缓慢向后收。',
+        "下巴尚未回收，请从头开始，缓慢将下巴向颈部方向收。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="neck_chin_tuck")
+
+
+# ---- neck_side_bend: 颈部侧屈拉伸 ----
 
 def _check_neck_bend(keypoints: list[list[float]]) -> dict[str, Any]:
+    """颈部侧屈：耳朵到同侧肩距离越小越好，同时还检查是否正对摄像头。"""
     left_ear = keypoints[COCO_KEYPOINTS["left_ear"]]
     right_ear = keypoints[COCO_KEYPOINTS["right_ear"]]
     left_shoulder = keypoints[COCO_KEYPOINTS["left_shoulder"]]
     right_shoulder = keypoints[COCO_KEYPOINTS["right_shoulder"]]
     nose = keypoints[COCO_KEYPOINTS["nose"]]
+
     shoulder_mid_x = (left_shoulder[0] + right_shoulder[0]) / 2
-    if abs(nose[0] - shoulder_mid_x) > 0.09:
-        return _score_response(["请正对摄像头，避免转头或身体旋转。"], 55)
+    alignment_ok = abs(nose[0] - shoulder_mid_x) <= 0.09
 
     dist_left = calculate_distance(left_ear, left_shoulder)
     dist_right = calculate_distance(right_ear, right_shoulder)
     active_dist = min(dist_left, dist_right)
-    if active_dist < 0.10:
-        return _score_response(["侧屈幅度很好，保持呼吸，不要耸肩。"], 96)
-    if active_dist < 0.15:
-        return _score_response(["侧屈方向正确，可以再轻一点靠近同侧肩部。"], 85)
-    return _score_response(["请缓慢将耳朵向同侧肩部靠近，感受颈侧拉伸。"], 65)
 
+    if not alignment_ok:
+        # 未正对摄像头：基于距离给分但封顶 65
+        raw = _linear_map(active_dist, best=0.0, worst=0.25, best_score=95, worst_score=25)
+        raw = min(raw, 65)
+        return _score_response(
+            ["请正对摄像头，避免转头或身体旋转，再进行侧屈。"],
+            int(round(raw)),
+            action_id="neck_side_bend",
+        )
+
+    # 连续评分：0 → 95, 0.10 → 80, 0.25 → 25
+    raw = _linear_map(active_dist, best=0.0, worst=0.25, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "侧屈幅度很好，颈部拉伸充分，保持呼吸不要耸肩。",
+        "侧屈方向正确，再轻一点靠近同侧肩部，感受颈侧拉伸。",
+        "请缓慢将耳朵向同侧肩部靠近，幅度还可加大。",
+        "请从正中位开始，缓慢侧屈头部，让耳朵靠近肩部。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="neck_side_bend")
+
+
+# ---- scapular_retraction: 肩胛后缩训练 ----
 
 def _check_scapular_retraction(keypoints: list[list[float]]) -> dict[str, Any]:
+    """肩胛后缩：耳朵 y 应明显大于肩 y（肩下沉），差值越大越好。"""
     shoulder_y = (keypoints[COCO_KEYPOINTS["left_shoulder"]][1] + keypoints[COCO_KEYPOINTS["right_shoulder"]][1]) / 2
     ear_y = (keypoints[COCO_KEYPOINTS["left_ear"]][1] + keypoints[COCO_KEYPOINTS["right_ear"]][1]) / 2
-    if (ear_y - shoulder_y) < 0.12:
-        return _score_response(["肩部有上提趋势，请先沉肩，再把肩胛骨向后下方夹紧。"], 72)
-    return _score_response(["肩部下沉，肩胛后缩动作稳定。"], 92)
+    gap = ear_y - shoulder_y  # 正值 = 肩低于耳（正确下沉）
 
+    # 连续评分：gap ≥ 0.15 → 95, 0.12 → 78, 0.02 → 30
+    raw = _linear_map(gap, best=0.15, worst=0.02, best_score=95, worst_score=30)
+
+    feedback = _graded_feedback(
+        raw,
+        "肩部下沉到位，肩胛后缩稳定，继续保持。",
+        "肩部下沉良好，再向后下方夹紧肩胛骨。",
+        "肩部有上提趋势，请先沉肩，再把肩胛骨向后下方夹紧。",
+        "肩部明显上提（耸肩），请先放松肩膀下垂，再尝试后缩。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="scapular_retraction")
+
+
+# ---- thoracic_extension: 胸椎伸展训练 ----
 
 def _check_thoracic_extension(keypoints: list[list[float]]) -> dict[str, Any]:
+    """胸椎伸展：肩 y 应小于髋 y（上身后仰），差值越负越好。"""
     shoulder_mid = midpoint(keypoints[COCO_KEYPOINTS["left_shoulder"]], keypoints[COCO_KEYPOINTS["right_shoulder"]])
     hip_mid = midpoint(keypoints[COCO_KEYPOINTS["left_hip"]], keypoints[COCO_KEYPOINTS["right_hip"]])
-    if shoulder_mid[1] < hip_mid[1]:
-        return _score_response(["胸椎伸展方向正确，注意不要用腰部过度代偿。"], 90)
-    return _score_response(["身体略前倾，请坐直并从上背部向后伸展。"], 72)
+    diff = shoulder_mid[1] - hip_mid[1]  # 负值 = 后仰（正确）
 
+    # 连续评分：diff ≤ -0.05 → 95, 0.0 → 72, 0.10 → 25
+    raw = _linear_map(diff, best=-0.05, worst=0.10, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "胸椎伸展充分，上身后仰到位，注意不要用腰部代偿。",
+        "胸椎伸展良好，可再向后仰一点，感受上背部伸展。",
+        "身体略前倾，请坐直并从胸椎段向后伸展。",
+        "身体明显前倾，请先挺直腰背，再从胸椎处缓慢后仰。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="thoracic_extension")
+
+
+# ---- mckenzie_press_up: 麦肯基俯卧撑 ----
 
 def _check_mckenzie_press_up(keypoints: list[list[float]]) -> dict[str, Any]:
+    """麦肯基俯卧撑：肘关节角度越大越好（手臂充分伸直）。"""
     left_elbow_angle = calculate_angle(
         keypoints[COCO_KEYPOINTS["left_shoulder"]],
         keypoints[COCO_KEYPOINTS["left_elbow"]],
@@ -295,116 +479,292 @@ def _check_mckenzie_press_up(keypoints: list[list[float]]) -> dict[str, Any]:
         keypoints[COCO_KEYPOINTS["right_wrist"]],
     )
     elbow_angle = max(left_elbow_angle, right_elbow_angle)
-    if elbow_angle > 155:
-        return _score_response(["手臂伸展充分，胸部抬离地面，骨盆保持贴地。"], 90)
-    return _score_response(["请用手臂力量缓慢撑起上半身，腰部不要出现锐痛。"], 72)
 
+    # 连续评分：≥ 175° → 95, 155° → 70, 130° → 25
+    raw = _linear_map(elbow_angle, best=175.0, worst=130.0, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "手臂充分伸直，胸部抬离地面，骨盆保持贴地，非常标准！",
+        "手臂伸展良好，可再用力撑起，让肘关节完全打直。",
+        "手臂伸展不够，请用手臂力量撑起上半身，腰部不要出现锐痛。",
+        "手臂弯曲较多，请从俯卧位开始，用手臂力量缓慢推起上半身。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="mckenzie_press_up")
+
+
+# ---- pelvic_tilt: 骨盆后倾训练 ----
 
 def _check_pelvic_tilt(keypoints: list[list[float]]) -> dict[str, Any]:
+    """骨盆后倾：仰卧位肩与髋 y 坐标应接近，差值越小越好。"""
     shoulder_mid_y = (keypoints[COCO_KEYPOINTS["left_shoulder"]][1] + keypoints[COCO_KEYPOINTS["right_shoulder"]][1]) / 2
     hip_mid_y = (keypoints[COCO_KEYPOINTS["left_hip"]][1] + keypoints[COCO_KEYPOINTS["right_hip"]][1]) / 2
-    if abs(hip_mid_y - shoulder_mid_y) < 0.12:
-        return _score_response(["收紧腹部，感受腰背轻贴地面，动作幅度保持小而稳定。"], 88)
-    return _score_response(["请保持仰卧屈膝姿势，专注骨盆轻微后倾。"], 75)
+    gap = abs(hip_mid_y - shoulder_mid_y)
 
+    # 连续评分：0.0 → 95, 0.08 → 80, 0.25 → 25
+    raw = _linear_map(gap, best=0.0, worst=0.25, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "核心收紧，腰背轻贴地面，骨盆后倾幅度小而稳定！",
+        "腹部收紧良好，骨盆后倾方向正确，再轻微收一点。",
+        "请保持仰卧屈膝姿势，专注骨盆轻微后倾，让腰部贴地。",
+        "身体未保持水平，请先调整至仰卧屈膝位，再尝试骨盆后倾。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="pelvic_tilt")
+
+
+# ---- bird_dog: 鸟狗式核心训练 ----
 
 def _check_bird_dog(keypoints: list[list[float]]) -> dict[str, Any]:
+    """鸟狗式：左右肩 y 差、左右髋 y 差均应很小，max 差值越小越好。"""
     shoulder_delta = abs(keypoints[COCO_KEYPOINTS["left_shoulder"]][1] - keypoints[COCO_KEYPOINTS["right_shoulder"]][1])
     hip_delta = abs(keypoints[COCO_KEYPOINTS["left_hip"]][1] - keypoints[COCO_KEYPOINTS["right_hip"]][1])
-    if shoulder_delta > 0.06 or hip_delta > 0.06:
-        return _score_response(["身体出现歪斜，请收紧核心，让肩和骨盆保持水平。"], 70)
-    return _score_response(["躯干稳定，手臂和腿向远处延伸，保持慢速控制。"], 92)
+    max_delta = max(shoulder_delta, hip_delta)
 
+    # 连续评分：0.0 → 95, 0.03 → 85, 0.15 → 25
+    raw = _linear_map(max_delta, best=0.0, worst=0.15, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "躯干稳定，肩和骨盆完全水平，手臂和腿向远处延伸！",
+        "躯干较稳定，再收紧核心，让肩和骨盆保持水平。",
+        "身体有轻微歪斜，请收紧核心，让肩和骨盆回到水平。",
+        "身体明显歪斜，请先回到四足跪姿稳定躯干，再缓慢伸展。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="bird_dog")
+
+
+# ---- dead_bug: 死虫式核心训练 ----
 
 def _check_dead_bug(keypoints: list[list[float]]) -> dict[str, Any]:
+    """死虫式：肩与髋 x 应对齐，偏移越小越好。"""
     shoulder_mid = midpoint(keypoints[COCO_KEYPOINTS["left_shoulder"]], keypoints[COCO_KEYPOINTS["right_shoulder"]])
     hip_mid = midpoint(keypoints[COCO_KEYPOINTS["left_hip"]], keypoints[COCO_KEYPOINTS["right_hip"]])
-    if abs(shoulder_mid[0] - hip_mid[0]) > 0.08:
-        return _score_response(["腰部有拱起趋势，请收紧腹部，让下背部贴近地面。"], 68)
-    return _score_response(["核心控制良好，继续缓慢交替手脚。"], 90)
+    offset_x = abs(shoulder_mid[0] - hip_mid[0])
 
+    # 连续评分：0.0 → 95, 0.04 → 80, 0.20 → 25
+    raw = _linear_map(offset_x, best=0.0, worst=0.20, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "核心控制优秀，躯干稳定无歪斜，下背部贴地！",
+        "核心控制良好，再收紧腹部让肩髋对齐。",
+        "腰部有拱起趋势，请收紧腹部，让下背部贴近地面。",
+        "腰部明显拱起，请先收腹让背部贴地，再缓慢交替手脚。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="dead_bug")
+
+
+# ---- glute_bridge: 臀桥训练 ----
 
 def _check_glute_bridge(keypoints: list[list[float]]) -> dict[str, Any]:
+    """臀桥：髋部应高于膝和肩，抬起越高越好。"""
     shoulder_y = (keypoints[COCO_KEYPOINTS["left_shoulder"]][1] + keypoints[COCO_KEYPOINTS["right_shoulder"]][1]) / 2
     hip_y = (keypoints[COCO_KEYPOINTS["left_hip"]][1] + keypoints[COCO_KEYPOINTS["right_hip"]][1]) / 2
     knee_y = (keypoints[COCO_KEYPOINTS["left_knee"]][1] + keypoints[COCO_KEYPOINTS["right_knee"]][1]) / 2
-    if hip_y < knee_y and hip_y < shoulder_y:
-        return _score_response(["臀部发力抬起，肩、髋、膝连线较好。"], 92)
-    return _score_response(["请继续抬高臀部，直到大腿与躯干接近一条直线。"], 72)
 
+    # 髋部抬起量：最低参考点与髋的 y 差（越大越好）
+    baseline = max(shoulder_y, knee_y)
+    lift = baseline - hip_y  # 正值 = 髋高于肩/膝基线
+
+    # 连续评分：lift ≥ 0.08 → 95, 0.0 → 60, -0.05 → 25
+    raw = _linear_map(lift, best=0.08, worst=-0.05, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "臀部充分抬起，肩髋膝连线平直，发力正确！",
+        "臀部抬起良好，再收紧臀肌抬高一点，直到大腿与躯干成线。",
+        "请继续抬高臀部，感受臀肌发力，直到肩髋膝接近一条直线。",
+        "臀部几乎未抬起，请先屈膝仰卧，再用力收紧臀肌向上顶髋。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="glute_bridge")
+
+
+# ---- wall_squat: 靠墙静蹲 ----
 
 def _check_wall_squat(keypoints: list[list[float]]) -> dict[str, Any]:
+    """靠墙静蹲：膝关节角度最优区间 90–100°，过小过大均扣分。"""
     angles = [
         calculate_angle(keypoints[COCO_KEYPOINTS["left_hip"]], keypoints[COCO_KEYPOINTS["left_knee"]], keypoints[COCO_KEYPOINTS["left_ankle"]]),
         calculate_angle(keypoints[COCO_KEYPOINTS["right_hip"]], keypoints[COCO_KEYPOINTS["right_knee"]], keypoints[COCO_KEYPOINTS["right_ankle"]]),
     ]
     knee_angle = min(angle for angle in angles if angle > 0)
-    if knee_angle < 85:
-        return _score_response(["下蹲略深，请稍微站高一点，避免膝关节压力过大。"], 72)
-    if knee_angle > 125:
-        return _score_response(["下蹲幅度还不够，请沿墙缓慢下滑。"], 78)
-    return _score_response(["膝关节角度合适，保持膝盖朝向脚尖。"], 94)
 
+    # 区间评分：opt=[90,105], bad=[50,160]
+    raw = _range_score(knee_angle, opt_lo=90, opt_hi=105, bad_lo=50, bad_hi=160, max_score=95, min_score=25)
+
+    if knee_angle < 85:
+        detail = f"当前角度 {knee_angle:.0f}°，下蹲略深，请稍微站高一点。"
+    elif knee_angle > 125:
+        detail = f"当前角度 {knee_angle:.0f}°，下蹲幅度还不够，请沿墙缓慢下滑。"
+    else:
+        detail = f"当前角度 {knee_angle:.0f}°，角度合适，保持膝盖朝向脚尖。"
+
+    feedback = _graded_feedback(
+        raw,
+        f"膝关节角度合适，保持膝盖朝向脚尖，非常标准！{detail}",
+        f"角度接近理想范围，微调即可。{detail}",
+        f"角度偏离较多。{detail}",
+        f"角度偏离过大，请调整下蹲深度。{detail}",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="wall_squat")
+
+
+# ---- straight_leg_raise: 直腿抬高训练 ----
 
 def _check_straight_leg_raise(keypoints: list[list[float]]) -> dict[str, Any]:
+    """直腿抬高：膝关节角度越大越好（腿充分伸直）。"""
     angles = [
         calculate_angle(keypoints[COCO_KEYPOINTS["left_hip"]], keypoints[COCO_KEYPOINTS["left_knee"]], keypoints[COCO_KEYPOINTS["left_ankle"]]),
         calculate_angle(keypoints[COCO_KEYPOINTS["right_hip"]], keypoints[COCO_KEYPOINTS["right_knee"]], keypoints[COCO_KEYPOINTS["right_ankle"]]),
     ]
     knee_angle = max(angles)
-    if knee_angle > 160:
-        return _score_response(["腿部伸直，抬腿过程保持缓慢。"], 90)
-    return _score_response(["请锁住膝盖，保持腿伸直后再抬起。"], 70)
 
+    # 连续评分：≥ 175° → 95, 160° → 75, 135° → 25
+    raw = _linear_map(knee_angle, best=175.0, worst=135.0, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "腿部完全伸直，抬腿过程缓慢控制，非常标准！",
+        "腿部较直，再锁住膝盖，让腿完全伸直后抬起。",
+        "膝盖有弯曲，请绷紧大腿前侧肌肉，锁住膝盖再抬腿。",
+        "膝盖明显弯曲，请先将腿完全伸直绷紧，再缓慢抬起。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="straight_leg_raise")
+
+
+# ---- quad_set: 股四头肌等长收缩 ----
 
 def _check_quad_set(keypoints: list[list[float]]) -> dict[str, Any]:
-    knee_angle = calculate_angle(keypoints[COCO_KEYPOINTS["left_hip"]], keypoints[COCO_KEYPOINTS["left_knee"]], keypoints[COCO_KEYPOINTS["left_ankle"]])
-    if knee_angle < 165:
-        return _score_response(["膝关节还没有完全伸直，请绷紧大腿前侧肌肉。"], 72)
-    return _score_response(["膝部伸直，股四头肌收缩到位，保持 5 秒。"], 92)
+    """股四头肌等长收缩：膝关节角度越大越好（充分伸直）。"""
+    knee_angle = calculate_angle(
+        keypoints[COCO_KEYPOINTS["left_hip"]],
+        keypoints[COCO_KEYPOINTS["left_knee"]],
+        keypoints[COCO_KEYPOINTS["left_ankle"]],
+    )
 
+    # 连续评分：≥ 175° → 95, 165° → 75, 140° → 25
+    raw = _linear_map(knee_angle, best=175.0, worst=140.0, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "膝部完全伸直，股四头肌收缩到位，保持 5 秒！",
+        "膝部较直，再绷紧大腿前侧肌肉，让膝关节完全打直。",
+        "膝关节未完全伸直，请用力绷紧大腿前侧肌肉。",
+        "膝关节明显弯曲，请先将腿放平，再用力收缩股四头肌。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="quad_set")
+
+
+# ---- calf_stretch: 小腿后侧拉伸 ----
 
 def _check_calf_stretch(keypoints: list[list[float]]) -> dict[str, Any]:
-    left_knee = calculate_angle(keypoints[COCO_KEYPOINTS["left_hip"]], keypoints[COCO_KEYPOINTS["left_knee"]], keypoints[COCO_KEYPOINTS["left_ankle"]])
-    right_knee = calculate_angle(keypoints[COCO_KEYPOINTS["right_hip"]], keypoints[COCO_KEYPOINTS["right_knee"]], keypoints[COCO_KEYPOINTS["right_ankle"]])
+    """小腿后侧拉伸：后侧腿膝关节角度越大越好（充分伸直）。"""
+    left_knee = calculate_angle(
+        keypoints[COCO_KEYPOINTS["left_hip"]],
+        keypoints[COCO_KEYPOINTS["left_knee"]],
+        keypoints[COCO_KEYPOINTS["left_ankle"]],
+    )
+    right_knee = calculate_angle(
+        keypoints[COCO_KEYPOINTS["right_hip"]],
+        keypoints[COCO_KEYPOINTS["right_knee"]],
+        keypoints[COCO_KEYPOINTS["right_ankle"]],
+    )
     rear_knee_angle = max(left_knee, right_knee)
-    if rear_knee_angle < 158:
-        return _score_response(["后侧腿需要再伸直一些，小腿后侧才会有稳定拉伸感。"], 72)
-    return _score_response(["后侧腿伸直较好，保持身体向墙面缓慢前移。"], 90)
 
+    # 连续评分：≥ 170° → 95, 158° → 72, 135° → 22
+    raw = _linear_map(rear_knee_angle, best=170.0, worst=135.0, best_score=95, worst_score=22)
+
+    feedback = _graded_feedback(
+        raw,
+        "后侧腿充分伸直，小腿后侧拉伸感明显！",
+        "后侧腿较直，再蹬直膝盖，让小腿后侧有稳定拉伸感。",
+        "后侧腿弯曲，请再伸直一些，小腿后侧才会有拉伸感。",
+        "后侧腿明显弯曲，请先调整站姿，后脚跟着地，膝盖打直。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="calf_stretch")
+
+
+# ---- ankle_pump: 踝泵运动 ----
 
 def _check_ankle_pump(keypoints: list[list[float]]) -> dict[str, Any]:
-    vertical_up = [0.0, -1.0, 0.0]
-    left_angle = calculate_angle(keypoints[COCO_KEYPOINTS["left_knee"]], keypoints[COCO_KEYPOINTS["left_ankle"]], [keypoints[COCO_KEYPOINTS["left_ankle"]][0], keypoints[COCO_KEYPOINTS["left_ankle"]][1] - 0.1, 0.0])
-    right_angle = calculate_angle(keypoints[COCO_KEYPOINTS["right_knee"]], keypoints[COCO_KEYPOINTS["right_ankle"]], [keypoints[COCO_KEYPOINTS["right_ankle"]][0], keypoints[COCO_KEYPOINTS["right_ankle"]][1] - 0.1, 0.0])
-    active_angle = max(left_angle, right_angle)
-    if active_angle < 70 or active_angle > 145:
-        return _score_response(["踝泵幅度较充分，继续做脚尖上勾和下踩的交替动作。"], 90)
-    return _score_response(["请加大脚踝活动幅度，脚尖尽量上勾再缓慢下踩。"], 76)
+    """踝泵运动：踝关节角度越远离 90° 越好（充分背伸/跖屈）。"""
+    def _ankle_angle(knee, ankle):
+        virt = [ankle[0], ankle[1] - 0.1, 0.0]
+        return calculate_angle(knee, ankle, virt)
 
+    left_angle = _ankle_angle(
+        keypoints[COCO_KEYPOINTS["left_knee"]],
+        keypoints[COCO_KEYPOINTS["left_ankle"]],
+    )
+    right_angle = _ankle_angle(
+        keypoints[COCO_KEYPOINTS["right_knee"]],
+        keypoints[COCO_KEYPOINTS["right_ankle"]],
+    )
+    active_angle = max(left_angle, right_angle)
+
+    # 踝泵评分：越远离 90° 越好
+    # 180° = 脚尖下踩到底（跖屈），0° = 脚尖上勾到底（背伸）
+    deviation = abs(active_angle - 90.0)  # 偏离 90° 的量
+    # deviation ≥ 70 → 95, deviation ≥ 40 → 80, deviation = 0 → 35
+    raw = _linear_map(deviation, best=70.0, worst=0.0, best_score=95, worst_score=35)
+
+    feedback = _graded_feedback(
+        raw,
+        "踝泵活动幅度充分，继续做脚尖上勾和下踩的交替！",
+        "踝泵幅度较好，再加大一点，脚尖尽量上勾再缓慢下踩。",
+        "请加大脚踝活动幅度，脚尖尽量向上勾再向下踩。",
+        "脚踝活动幅度太小，请在无痛范围内尽量勾脚尖和踩脚尖。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="ankle_pump")
+
+
+# ---- shoulder_pendulum: 肩关节钟摆运动 ----
 
 def _check_shoulder_pendulum(keypoints: list[list[float]]) -> dict[str, Any]:
+    """肩关节钟摆：手腕到肩距离越大越好（手臂放松下垂）。"""
     left_dist = calculate_distance(keypoints[COCO_KEYPOINTS["left_wrist"]], keypoints[COCO_KEYPOINTS["left_shoulder"]])
     right_dist = calculate_distance(keypoints[COCO_KEYPOINTS["right_wrist"]], keypoints[COCO_KEYPOINTS["right_shoulder"]])
-    if max(left_dist, right_dist) < 0.26:
-        return _score_response(["手臂略紧张，请放松肩部，让手臂自然下垂摆动。"], 74)
-    return _score_response(["手臂下垂自然，利用身体轻微摆动带动手臂。"], 90)
+    max_dist = max(left_dist, right_dist)
 
+    # 连续评分：≥ 0.35 → 95, 0.26 → 75, 0.16 → 25
+    raw = _linear_map(max_dist, best=0.35, worst=0.16, best_score=95, worst_score=25)
+
+    feedback = _graded_feedback(
+        raw,
+        "手臂完全放松下垂，利用身体轻微摆动带动手臂。",
+        "手臂较放松，再让肩部下沉，手臂自然下垂摆动。",
+        "手臂略紧张，请放松肩部，让手臂像钟摆一样自然下垂。",
+        "手臂明显紧张未下垂，请先放松肩关节，让手臂完全垂下。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="shoulder_pendulum")
+
+
+# ---- shoulder_external_rotation: 肩外旋弹力带训练 ----
 
 def _check_shoulder_external_rotation(keypoints: list[list[float]]) -> dict[str, Any]:
+    """肩外旋：肘到髋距离越小越好（肘夹紧身体）。"""
     left_elbow_hip = calculate_distance(keypoints[COCO_KEYPOINTS["left_elbow"]], keypoints[COCO_KEYPOINTS["left_hip"]])
     right_elbow_hip = calculate_distance(keypoints[COCO_KEYPOINTS["right_elbow"]], keypoints[COCO_KEYPOINTS["right_hip"]])
-    if min(left_elbow_hip, right_elbow_hip) < 0.18:
-        return _score_response(["肘部贴近身体，外旋方向正确。"], 92)
-    return _score_response(["请把肘部夹紧身体侧面，再缓慢向外旋转前臂。"], 72)
+    min_dist = min(left_elbow_hip, right_elbow_hip)
+
+    # 连续评分：≤ 0.12 → 95, 0.18 → 75, 0.35 → 22
+    raw = _linear_map(min_dist, best=0.12, worst=0.35, best_score=95, worst_score=22)
+
+    feedback = _graded_feedback(
+        raw,
+        "肘部紧贴身体侧面，外旋方向正确，非常标准！",
+        "肘部较贴近身体，再夹紧一点，然后缓慢外旋前臂。",
+        "请把肘部夹紧身体侧面，再向外旋转前臂。",
+        "肘部远离身体，请先将上臂紧贴躯干，再尝试外旋。",
+    )
+    return _score_response(feedback, int(round(raw)), action_id="shoulder_external_rotation")
 
 
-# ============================================================================
-# DeepRehabPile ML 评分动作（8 个新增）
-# ============================================================================
-# 这些动作不使用传统的几何规则评分，而是通过 DeepRehabPile 模型
-# 对一段骨架序列进行推理。每帧的评分结果来自模型缓存。
-
+# ========================================================================
+# DeepRehabPile ML 评分动作（8 个）
+# ========================================================================
 
 def _check_ml_action(keypoints: list[list[float]], action_id: str) -> dict[str, Any]:
     """ML 动作的通用 Checker：读取 DeepRehabScorer 缓存的评分。"""
@@ -413,7 +773,6 @@ def _check_ml_action(keypoints: list[list[float]], action_id: str) -> dict[str, 
     if result is not None:
         return result
 
-    # 模型尚未产生结果：提示正在进行 AI 评估
     total = scorer.total_frames(action_id)
     remaining = max(0, 300 - total)
 
