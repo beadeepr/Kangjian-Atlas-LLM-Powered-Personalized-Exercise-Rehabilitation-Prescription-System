@@ -2549,6 +2549,32 @@ textarea {
   background: rgba(254, 242, 242, 0.85);
 }
 
+.imaging-report-card.risk-medium {
+  border-color: rgba(234, 88, 12, 0.35);
+  background: rgba(255, 247, 237, 0.9);
+}
+
+.imaging-report-card.risk-unknown {
+  border-color: rgba(100, 116, 139, 0.35);
+  background: rgba(248, 250, 252, 0.95);
+}
+
+.imaging-summary-label {
+  margin: 8px 0 4px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.imaging-upload-note {
+  margin-top: 8px;
+  color: #b42318;
+}
+
+.imaging-reject-reason {
+  color: #b45309;
+}
+
 .imaging-report-head {
   display: flex;
   justify-content: space-between;

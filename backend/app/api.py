@@ -193,9 +193,9 @@ def save_imaging_report_file(user_id: int, file_name: str | None, file_content_b
 
     safe_name = Path(file_name).name
     extension = Path(safe_name).suffix.lower()
-    allowed_extensions = {".png", ".jpg", ".jpeg", ".pdf", ".txt"}
+    allowed_extensions = {".png", ".jpg", ".jpeg", ".pdf", ".txt", ".md", ".docx"}
     if extension not in allowed_extensions:
-        raise HTTPException(status_code=400, detail="only png, jpg, jpeg, pdf, txt reports are supported")
+        raise HTTPException(status_code=400, detail="only png, jpg, jpeg, pdf, txt, md, docx reports are supported")
 
     digest = hashlib.sha256(content).hexdigest()[:16]
     content_types = {
@@ -204,6 +204,8 @@ def save_imaging_report_file(user_id: int, file_name: str | None, file_content_b
         ".jpeg": "image/jpeg",
         ".pdf": "application/pdf",
         ".txt": "text/plain; charset=utf-8",
+        ".md": "text/markdown; charset=utf-8",
+        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     }
     object_name = f"imaging_reports/{user_id}/{digest}{extension}"
     from .object_storage import save_object
@@ -214,14 +216,47 @@ def save_imaging_report_file(user_id: int, file_name: str | None, file_content_b
 def extract_text_report_content(file_name: str | None, file_content_base64: str | None) -> str | None:
     if not file_name or not file_content_base64:
         return None
-    if Path(file_name).suffix.lower() != ".txt":
+
+    extension = Path(file_name).suffix.lower()
+    text_extensions = {".txt", ".md", ".pdf", ".docx"}
+    if extension not in text_extensions:
         return None
+
     try:
         content = base64.b64decode(file_content_base64, validate=True)
     except (binascii.Error, ValueError):
         return None
-    text = content.decode("utf-8", errors="ignore").strip()
-    return text or None
+
+    if extension in {".txt", ".md"}:
+        text = content.decode("utf-8", errors="ignore").strip()
+        return text or None
+
+    if extension == ".pdf":
+        try:
+            import io
+
+            from pypdf import PdfReader
+
+            reader = PdfReader(io.BytesIO(content))
+            parts = [page.extract_text() or "" for page in reader.pages]
+            text = "\n".join(parts).strip()
+            return text or None
+        except Exception:
+            return None
+
+    if extension == ".docx":
+        try:
+            import io
+
+            from docx import Document
+
+            document = Document(io.BytesIO(content))
+            text = "\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text).strip()
+            return text or None
+        except Exception:
+            return None
+
+    return None
 
 
 def clean_patient_profile_payload(req, partial: bool = False):
@@ -811,7 +846,7 @@ def create_imaging_report_api(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from .validators import detect_red_flags
+    from .validators import detect_red_flags, validate_imaging_report_content
 
     if req.patient_profile_id is not None:
         profile = get_patient_profile(db, profile_id=req.patient_profile_id, user_id=current_user.id)
@@ -820,11 +855,16 @@ def create_imaging_report_api(
     if not req.file_content_base64 and not req.ocr_text:
         raise HTTPException(status_code=400, detail="file_content_base64 or ocr_text required")
 
-    report_type = req.report_type.strip() if req.report_type else "影像报告"
+    report_type = req.report_type.strip() if req.report_type else "其他报告"
     file_name = Path(req.file_name).name if req.file_name else None
     ocr_text = req.ocr_text.strip() if req.ocr_text else None
     extracted_text = None if ocr_text else extract_text_report_content(file_name, req.file_content_base64)
     ocr_text = ocr_text or extracted_text
+
+    if ocr_text:
+        content_error = validate_imaging_report_content(ocr_text)
+        if content_error:
+            raise HTTPException(status_code=400, detail=content_error)
 
     file_path = save_imaging_report_file(current_user.id, file_name, req.file_content_base64)
     red_flags = detect_red_flags(ocr_text or "")
