@@ -22,6 +22,7 @@ class PrescriptionModel(Base):
     history = Column(Text, nullable=True)
     summary = Column(Text, nullable=True)
     raw_response = Column(JSON, nullable=True)
+    sequence_no = Column(Integer, nullable=True, index=True)
     created_at = Column(DateTime, default=now)
     updated_at = Column(DateTime, default=now, onupdate=now)
 

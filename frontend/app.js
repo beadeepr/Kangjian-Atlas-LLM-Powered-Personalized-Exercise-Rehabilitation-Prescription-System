@@ -1768,6 +1768,11 @@ function updateUserIdentity() {
     : `账号：${state.currentUser.account}`;
 }
 
+function formatPrescriptionLabel(prescription) {
+  const sequenceNo = prescription?.sequence_no ?? prescription?.id;
+  return sequenceNo ? `#${sequenceNo}` : "N/A";
+}
+
 function renderHistoryCard(prescription) {
   const header = [
     prescription.patient_name ? `患者：${escapeHtml(prescription.patient_name)}` : "",
@@ -1778,7 +1783,7 @@ function renderHistoryCard(prescription) {
 
   return `
     <article class="history-card">
-      <h4>处方 #${escapeHtml(prescription.id || "N/A")}</h4>
+      <h4>处方 ${escapeHtml(formatPrescriptionLabel(prescription))}</h4>
       ${header ? `<div class="meta">${header}</div>` : ""}
       <div class="summary-block">${formatSummary(prescription.summary)}</div>
       <ul>
@@ -1939,7 +1944,9 @@ function renderActionVideoMarkup(action) {
 
 function renderPrescription(prescription) {
   const metaParts = [];
-  if (prescription.id) metaParts.push(`处方编号 #${prescription.id}`);
+  if (prescription.sequence_no || prescription.id) {
+    metaParts.push(`处方编号 ${formatPrescriptionLabel(prescription)}`);
+  }
   if (prescription.patient_name) metaParts.push(`患者：${prescription.patient_name}`);
   if (prescription.patient_age) metaParts.push(`年龄：${prescription.patient_age}`);
   if (prescription.source === "mock") metaParts.push("来源：本地 Mock");

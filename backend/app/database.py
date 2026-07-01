@@ -53,6 +53,8 @@ def _ensure_sqlite_columns():
             statements.append("ALTER TABLE prescriptions ADD COLUMN user_id INTEGER")
         if "patient_profile_id" not in columns:
             statements.append("ALTER TABLE prescriptions ADD COLUMN patient_profile_id INTEGER")
+        if "sequence_no" not in columns:
+            statements.append("ALTER TABLE prescriptions ADD COLUMN sequence_no INTEGER")
 
     if "imaging_reports" in table_names:
         imaging_columns = {column["name"] for column in inspector.get_columns("imaging_reports")}
@@ -71,7 +73,33 @@ def _ensure_sqlite_columns():
             statements.append("ALTER TABLE users ADD COLUMN role VARCHAR(32) NOT NULL DEFAULT 'user'")
 
     if not statements:
+        _backfill_prescription_sequence_numbers()
         return
     with engine.begin() as connection:
         for statement in statements:
             connection.execute(text(statement))
+    _backfill_prescription_sequence_numbers()
+
+
+def _backfill_prescription_sequence_numbers():
+    from .models import PrescriptionModel
+
+    db = SessionLocal()
+    try:
+        user_ids = [row[0] for row in db.query(PrescriptionModel.user_id).distinct()]
+        for user_id in user_ids:
+            query = db.query(PrescriptionModel)
+            if user_id is None:
+                query = query.filter(PrescriptionModel.user_id.is_(None))
+            else:
+                query = query.filter(PrescriptionModel.user_id == user_id)
+            prescriptions = query.order_by(
+                PrescriptionModel.created_at.asc(),
+                PrescriptionModel.id.asc(),
+            ).all()
+            for index, prescription in enumerate(prescriptions, start=1):
+                if prescription.sequence_no != index:
+                    prescription.sequence_no = index
+        db.commit()
+    finally:
+        db.close()

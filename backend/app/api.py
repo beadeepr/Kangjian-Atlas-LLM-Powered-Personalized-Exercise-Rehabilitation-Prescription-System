@@ -585,6 +585,7 @@ def prescription_export_payload(prescription, actions):
     action_items = action_response_items(actions)
     return {
         "id": prescription.id,
+        "sequence_no": prescription.sequence_no,
         "patient_profile_id": prescription.patient_profile_id,
         "patient_name": prescription.patient_name,
         "patient_age": prescription.patient_age,
@@ -604,7 +605,7 @@ def render_prescription_export(payload: dict, export_format: str):
     lines = [
         "# 康复处方",
         "",
-        f"- 处方编号：{payload.get('id')}",
+        f"- 处方编号：{payload.get('sequence_no') or payload.get('id')}",
         f"- 患者姓名：{payload.get('patient_name') or '未填写'}",
         f"- 患者年龄：{payload.get('patient_age') if payload.get('patient_age') is not None else '未填写'}",
         f"- 主诉：{payload.get('symptoms') or '未填写'}",
@@ -1539,6 +1540,7 @@ def generate_prescription(
     actions = get_actions_by_prescription(db, prescription.id)
     return PrescriptionResponse(
         id=prescription.id,
+        sequence_no=prescription.sequence_no,
         patient_profile_id=prescription.patient_profile_id,
         patient_name=prescription.patient_name,
         patient_age=prescription.patient_age,
@@ -1585,6 +1587,7 @@ def read_prescription(
     actions = get_actions_by_prescription(db, prescription.id)
     return PrescriptionResponse(
         id=prescription.id,
+        sequence_no=prescription.sequence_no,
         patient_profile_id=prescription.patient_profile_id,
         patient_name=prescription.patient_name,
         patient_age=prescription.patient_age,
@@ -2175,6 +2178,7 @@ def list_prescriptions(db: Session = Depends(get_db), current_user=Depends(get_c
         actions = get_actions_by_prescription(db, prescription.id)
         result.append(PrescriptionResponse(
             id=prescription.id,
+            sequence_no=prescription.sequence_no,
             patient_profile_id=prescription.patient_profile_id,
             patient_name=prescription.patient_name,
             patient_age=prescription.patient_age,
