@@ -146,14 +146,7 @@ def validate_imaging_report_content(text: str) -> str | None:
     if not cleaned:
         return None
 
-    non_medical_hits = sum(1 for hint in _NON_MEDICAL_REPORT_HINTS if hint in cleaned)
     medical_like = _is_medical_report_like(cleaned)
-    if non_medical_hits >= 1 and not medical_like:
-        return "上传内容似乎不是医学检查报告，请上传正规检查报告或粘贴关键诊断结论。"
-
-    if len(cleaned) >= 20 and not medical_like:
-        return "未识别到医学检查报告相关内容，请确认文件是否正确，或直接粘贴诊断结论。"
-
     if len(cleaned) < 20 and not medical_like:
         return "报告内容过短且缺少医学检查相关信息，请补充诊断结论或更换正确文件。"
 

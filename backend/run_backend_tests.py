@@ -209,7 +209,7 @@ class BackendSmokeSuite:
         assert any("明显肿胀" in (item.get("contraindications") or "") for item in safety["filtered_actions"])
         assert all((action["sets"] or 0) <= 2 for action in data["actions"])
 
-    def imaging_report_flow(self):
+    def legacy_imaging_report_flow(self):
         report_text = "MRI报告提示腰椎间盘突出，患者描述下肢麻木无力，建议结合临床就医评估。"
         encoded = base64.b64encode(report_text.encode("utf-8")).decode("ascii")
         response = self.client.post("/api/imaging_reports", headers=self.user_headers, json={
@@ -237,6 +237,105 @@ class BackendSmokeSuite:
         response = self.client.get(f"/api/imaging_reports/{data['id']}", headers=self.user_headers)
         assert response.status_code == 200, response.text
         assert response.json()["id"] == data["id"]
+
+    def imaging_report_flow(self):
+        from app import imaging_analysis
+
+        original_analyze = imaging_analysis.analyze_imaging_report
+
+        def fake_analyze(text: str, report_type: str | None = None):
+            if "番茄鸡蛋" in text:
+                return {
+                    "is_medical_report": False,
+                    "summary": None,
+                    "red_flags": [],
+                    "risk_level": "unknown",
+                    "reject_reason": "内容不符合医学检查报告特征，请上传 MRI/X光/CT 报告或粘贴诊断结论。",
+                    "confidence": 0.88,
+                }
+            return {
+                "is_medical_report": True,
+                "summary": "MRI 提示腰椎间盘突出，伴下肢麻木无力，建议结合临床就医评估。",
+                "red_flags": [
+                    {
+                        "code": "numbness_or_weakness",
+                        "label": "下肢麻木或无力",
+                        "evidence": "下肢麻木无力",
+                    }
+                ],
+                "risk_level": "high",
+                "reject_reason": None,
+                "confidence": 0.92,
+            }
+
+        try:
+            imaging_analysis.analyze_imaging_report = fake_analyze
+            report_text = "MRI报告提示腰椎间盘突出，患者描述下肢麻木无力，建议结合临床就医评估。"
+            encoded = base64.b64encode(report_text.encode("utf-8")).decode("ascii")
+            response = self.client.post("/api/imaging_reports", headers=self.user_headers, json={
+                "patient_profile_id": self.created_profile_id,
+                "report_type": "MRI",
+                "file_name": "lumbar_mri.txt",
+                "file_content_base64": encoded,
+                "note": "自动化测试报告",
+            })
+            assert response.status_code == 201, response.text
+            data = response.json()
+            assert data["patient_profile_id"] == self.created_profile_id
+            assert data["file_path"]
+            assert data["ocr_status"] == "llm_analyzed"
+            assert data["analysis_status"] == "completed"
+            assert data["summary"]
+            assert data["risk_level"] == "high"
+            assert any(item["code"] == "numbness_or_weakness" for item in data["red_flags"])
+
+            recipe_text = "今日食谱：番茄鸡蛋面，准备番茄、鸡蛋、面条，先炒蛋再煮面。"
+            recipe_encoded = base64.b64encode(recipe_text.encode("utf-8")).decode("ascii")
+            response = self.client.post("/api/imaging_reports", headers=self.user_headers, json={
+                "patient_profile_id": self.created_profile_id,
+                "report_type": "其他",
+                "file_name": "recipe.txt",
+                "file_content_base64": recipe_encoded,
+            })
+            assert response.status_code == 400, response.text
+            assert "医学检查报告" in response.json()["detail"]
+
+            image_encoded = base64.b64encode(b"\x89PNG\r\n\x1a\n").decode("ascii")
+            response = self.client.post("/api/imaging_reports", headers=self.user_headers, json={
+                "patient_profile_id": self.created_profile_id,
+                "report_type": "CT",
+                "file_name": "scan.png",
+                "file_content_base64": image_encoded,
+            })
+            assert response.status_code == 201, response.text
+            assert response.json()["ocr_status"] == "pending_external_ocr"
+
+            def failing_analyze(text: str, report_type: str | None = None):
+                raise RuntimeError("DeepSeek unavailable")
+
+            imaging_analysis.analyze_imaging_report = failing_analyze
+            response = self.client.post("/api/imaging_reports", headers=self.user_headers, json={
+                "patient_profile_id": self.created_profile_id,
+                "report_type": "MRI",
+                "ocr_text": report_text,
+            })
+            assert response.status_code == 201, response.text
+            failed_data = response.json()
+            assert failed_data["ocr_status"] == "pending_llm_review"
+            assert failed_data["risk_level"] == "unknown"
+
+            response = self.client.get(
+                f"/api/imaging_reports?patient_profile_id={self.created_profile_id}",
+                headers=self.user_headers,
+            )
+            assert response.status_code == 200, response.text
+            assert any(item["id"] == data["id"] for item in response.json())
+
+            response = self.client.get(f"/api/imaging_reports/{data['id']}", headers=self.user_headers)
+            assert response.status_code == 200, response.text
+            assert response.json()["id"] == data["id"]
+        finally:
+            imaging_analysis.analyze_imaging_report = original_analyze
 
     def red_flag_prescription_block(self):
         self.imaging_report_flow()

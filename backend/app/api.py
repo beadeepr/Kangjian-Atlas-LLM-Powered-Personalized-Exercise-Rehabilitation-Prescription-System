@@ -171,6 +171,10 @@ def imaging_report_response(report):
         ocr_status=report.ocr_status,
         risk_level=report.risk_level,
         red_flags=report.red_flags,
+        summary=report.summary,
+        reject_reason=report.reject_reason,
+        analysis_status=report.analysis_status,
+        confidence=report.confidence,
         note=report.note,
         created_at=report.created_at,
     )
@@ -257,6 +261,30 @@ def extract_text_report_content(file_name: str | None, file_content_base64: str 
             return None
 
     return None
+
+
+def _highest_risk(*levels: str | None) -> str:
+    ranks = {"unknown": 0, "low": 1, "medium": 2, "high": 3}
+    best = "unknown"
+    for level in levels:
+        normalized = (level or "unknown").lower()
+        if normalized not in ranks:
+            normalized = "unknown"
+        if ranks[normalized] > ranks[best]:
+            best = normalized
+    return best
+
+
+def _merge_red_flags(primary: list[dict] | None, secondary: list[dict] | None) -> list[dict]:
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for item in list(primary or []) + list(secondary or []):
+        code = str(item.get("code") or "").strip()
+        if not code or code in seen:
+            continue
+        seen.add(code)
+        merged.append(item)
+    return merged
 
 
 def clean_patient_profile_payload(req, partial: bool = False):
@@ -846,7 +874,8 @@ def create_imaging_report_api(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    from .validators import detect_red_flags, validate_imaging_report_content
+    from .imaging_analysis import DEFAULT_REJECT_REASON, analyze_imaging_report
+    from .validators import detect_red_flags
 
     if req.patient_profile_id is not None:
         profile = get_patient_profile(db, profile_id=req.patient_profile_id, user_id=current_user.id)
@@ -857,24 +886,53 @@ def create_imaging_report_api(
 
     report_type = req.report_type.strip() if req.report_type else "其他报告"
     file_name = Path(req.file_name).name if req.file_name else None
+    if not req.report_type:
+        report_type = "其他报告"
     ocr_text = req.ocr_text.strip() if req.ocr_text else None
     extracted_text = None if ocr_text else extract_text_report_content(file_name, req.file_content_base64)
     ocr_text = ocr_text or extracted_text
 
-    if ocr_text:
-        content_error = validate_imaging_report_content(ocr_text)
-        if content_error:
-            raise HTTPException(status_code=400, detail=content_error)
-
-    file_path = save_imaging_report_file(current_user.id, file_name, req.file_content_base64)
-    red_flags = detect_red_flags(ocr_text or "")
-    risk_level = "high" if red_flags else ("low" if ocr_text else "unknown")
+    regex_red_flags = detect_red_flags(ocr_text or "")
+    red_flags = regex_red_flags
+    risk_level = "high" if regex_red_flags else ("unknown" if not ocr_text else "low")
+    summary = None
+    reject_reason = None
+    analysis_status = None
+    confidence = None
     if req.ocr_text:
         ocr_status = "provided"
     elif extracted_text:
         ocr_status = "text_file_extracted"
     else:
         ocr_status = "pending_external_ocr"
+
+    if ocr_text:
+        try:
+            analysis = analyze_imaging_report(ocr_text, report_type)
+        except Exception:
+            analysis_status = "failed"
+            ocr_status = "pending_llm_review"
+            risk_level = "unknown"
+            red_flags = []
+        else:
+            if not analysis.get("is_medical_report"):
+                raise HTTPException(
+                    status_code=400,
+                    detail=analysis.get("reject_reason") or DEFAULT_REJECT_REASON,
+                )
+            llm_red_flags = analysis.get("red_flags") or []
+            red_flags = _merge_red_flags(llm_red_flags, regex_red_flags)
+            regex_risk = "high" if regex_red_flags else "unknown"
+            risk_level = _highest_risk(analysis.get("risk_level"), regex_risk)
+            if risk_level == "unknown" and ocr_text:
+                risk_level = "low"
+            summary = analysis.get("summary")
+            reject_reason = analysis.get("reject_reason")
+            analysis_status = "completed"
+            confidence = analysis.get("confidence")
+            ocr_status = "llm_analyzed"
+
+    file_path = save_imaging_report_file(current_user.id, file_name, req.file_content_base64)
 
     cleaned = ImagingReportCreateRequest(
         patient_profile_id=req.patient_profile_id,
@@ -891,6 +949,10 @@ def create_imaging_report_api(
         ocr_status=ocr_status,
         risk_level=risk_level,
         red_flags=red_flags,
+        summary=summary,
+        reject_reason=reject_reason,
+        analysis_status=analysis_status,
+        confidence=confidence,
     )
     return imaging_report_response(report)
 

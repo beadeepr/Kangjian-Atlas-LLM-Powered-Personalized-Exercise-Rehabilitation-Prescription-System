@@ -143,6 +143,10 @@ class ImagingReportResponse(BaseModel):
     ocr_status: str
     risk_level: str
     red_flags: Optional[List[dict]] = None
+    summary: Optional[str] = None
+    reject_reason: Optional[str] = None
+    analysis_status: Optional[str] = None
+    confidence: Optional[float] = None
     note: Optional[str] = None
     created_at: Optional[datetime] = None
 

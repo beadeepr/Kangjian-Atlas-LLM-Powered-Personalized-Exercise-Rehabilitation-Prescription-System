@@ -181,6 +181,10 @@ def create_imaging_report(
     ocr_status: str,
     risk_level: str,
     red_flags: list[dict],
+    summary: str | None = None,
+    reject_reason: str | None = None,
+    analysis_status: str | None = None,
+    confidence: float | None = None,
 ):
     report = models.ImagingReportModel(
         user_id=user_id,
@@ -192,6 +196,10 @@ def create_imaging_report(
         ocr_status=ocr_status,
         risk_level=risk_level,
         red_flags=red_flags,
+        summary=summary,
+        reject_reason=reject_reason,
+        analysis_status=analysis_status,
+        confidence=confidence,
         note=request.note,
     )
     db.add(report)

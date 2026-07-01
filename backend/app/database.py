@@ -44,16 +44,26 @@ def check_database() -> bool:
 def _ensure_sqlite_columns():
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
-    if "prescriptions" not in table_names:
-        return
-    columns = {column["name"] for column in inspector.get_columns("prescriptions")}
     statements = []
-    if "raw_response" not in columns:
-        statements.append("ALTER TABLE prescriptions ADD COLUMN raw_response JSON")
-    if "user_id" not in columns:
-        statements.append("ALTER TABLE prescriptions ADD COLUMN user_id INTEGER")
-    if "patient_profile_id" not in columns:
-        statements.append("ALTER TABLE prescriptions ADD COLUMN patient_profile_id INTEGER")
+    if "prescriptions" in table_names:
+        columns = {column["name"] for column in inspector.get_columns("prescriptions")}
+        if "raw_response" not in columns:
+            statements.append("ALTER TABLE prescriptions ADD COLUMN raw_response JSON")
+        if "user_id" not in columns:
+            statements.append("ALTER TABLE prescriptions ADD COLUMN user_id INTEGER")
+        if "patient_profile_id" not in columns:
+            statements.append("ALTER TABLE prescriptions ADD COLUMN patient_profile_id INTEGER")
+
+    if "imaging_reports" in table_names:
+        imaging_columns = {column["name"] for column in inspector.get_columns("imaging_reports")}
+        if "summary" not in imaging_columns:
+            statements.append("ALTER TABLE imaging_reports ADD COLUMN summary TEXT")
+        if "reject_reason" not in imaging_columns:
+            statements.append("ALTER TABLE imaging_reports ADD COLUMN reject_reason TEXT")
+        if "analysis_status" not in imaging_columns:
+            statements.append("ALTER TABLE imaging_reports ADD COLUMN analysis_status VARCHAR(32)")
+        if "confidence" not in imaging_columns:
+            statements.append("ALTER TABLE imaging_reports ADD COLUMN confidence FLOAT")
 
     if "users" in table_names:
         user_columns = {column["name"] for column in inspector.get_columns("users")}
