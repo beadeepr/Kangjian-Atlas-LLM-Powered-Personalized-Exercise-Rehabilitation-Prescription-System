@@ -1769,8 +1769,38 @@ function updateUserIdentity() {
 }
 
 function formatPrescriptionLabel(prescription) {
-  const sequenceNo = prescription?.sequence_no ?? prescription?.id;
+  const sequenceNo = prescription?.sequence_no;
   return sequenceNo ? `#${sequenceNo}` : "N/A";
+}
+
+async function hydratePrescriptionDetails(prescription) {
+  if (
+    !prescription?.id ||
+    prescription.sequence_no ||
+    window.APP_CONFIG.DEMO_MODE ||
+    !isSessionReady()
+  ) {
+    return prescription;
+  }
+
+  try {
+    const response = await fetchWithTimeout(
+      `${window.APP_CONFIG.API_BASE}/prescriptions/${prescription.id}`,
+      { headers: authHeaders() },
+      window.APP_CONFIG.LIST_TIMEOUT_MS
+    );
+    if (!response.ok) return prescription;
+    const data = await response.json();
+    return {
+      ...prescription,
+      sequence_no: data.sequence_no ?? prescription.sequence_no,
+      patient_profile_id: data.patient_profile_id ?? prescription.patient_profile_id,
+      patient_name: data.patient_name ?? prescription.patient_name,
+      patient_age: data.patient_age ?? prescription.patient_age,
+    };
+  } catch {
+    return prescription;
+  }
 }
 
 function renderHistoryCard(prescription) {
@@ -1837,7 +1867,14 @@ async function loadPrescriptionHistory() {
         state.currentUser.age ? `年龄：${state.currentUser.age} 岁 · ` : ""
       }账号：${state.currentUser.account} · 共 ${data.length} 条处方`;
     }
-    els.prescriptionHistory.innerHTML = data.map(renderHistoryCard).join("");
+    els.prescriptionHistory.innerHTML = data
+      .map((prescription, index, list) =>
+        renderHistoryCard({
+          ...prescription,
+          sequence_no: prescription.sequence_no ?? list.length - index,
+        })
+      )
+      .join("");
     els.prescriptionHistory.querySelectorAll(".history-export-md").forEach((button) => {
       button.addEventListener("click", async () => {
         const id = Number(button.dataset.id);
@@ -1919,6 +1956,7 @@ async function requestPrescription(formData) {
   const data = await response.json();
   return {
     id: data.id,
+    sequence_no: data.sequence_no,
     patient_profile_id: data.patient_profile_id,
     patient_name: data.patient_name,
     patient_age: data.patient_age,
@@ -1944,7 +1982,7 @@ function renderActionVideoMarkup(action) {
 
 function renderPrescription(prescription) {
   const metaParts = [];
-  if (prescription.sequence_no || prescription.id) {
+  if (prescription.sequence_no) {
     metaParts.push(`处方编号 ${formatPrescriptionLabel(prescription)}`);
   }
   if (prescription.patient_name) metaParts.push(`患者：${prescription.patient_name}`);
@@ -2857,6 +2895,14 @@ function restoreSessionState() {
     renderPrescriptionRecap(savedFormData);
     updatePrescriptionExportBar();
     updatePrescriptionFeedbackCard();
+    hydratePrescriptionDetails(savedPrescription).then((prescription) => {
+      if (!prescription?.sequence_no || prescription.sequence_no === savedPrescription.sequence_no) {
+        return;
+      }
+      state.prescription = prescription;
+      savePrescriptionToSession(prescription, savedFormData);
+      renderPrescription(prescription);
+    });
   }
 
   if (savedStep && canRestoreStep(savedStep)) {
@@ -2897,6 +2943,14 @@ registerStepLoader("prescription", () => {
   updatePrescriptionExportBar();
   updatePrescriptionFeedbackCard();
   renderPrescriptionCollaboration();
+  if (state.prescription && !state.prescription.sequence_no) {
+    hydratePrescriptionDetails(state.prescription).then((prescription) => {
+      if (!prescription?.sequence_no) return;
+      state.prescription = prescription;
+      savePrescriptionToSession(prescription, loadFormDataFromSession());
+      renderPrescription(prescription);
+    });
+  }
 });
 setStepNavEl(document.querySelector(".step-nav"));
 

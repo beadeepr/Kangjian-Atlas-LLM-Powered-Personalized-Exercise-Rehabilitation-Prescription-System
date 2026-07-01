@@ -402,6 +402,8 @@ export function createCollaborationPage(ctx) {
 
     if (popover) popover.hidden = true;
 
+    document.getElementById("prescription-collaboration-card")?.classList.remove("doctor-picker-open");
+
     if (doctorPickerOutsideHandler) {
 
       document.removeEventListener("click", doctorPickerOutsideHandler);
@@ -435,6 +437,8 @@ export function createCollaborationPage(ctx) {
 
 
     popover.hidden = false;
+
+    document.getElementById("prescription-collaboration-card")?.classList.add("doctor-picker-open");
 
     const listEl = document.getElementById("doctor-picker-list");
 

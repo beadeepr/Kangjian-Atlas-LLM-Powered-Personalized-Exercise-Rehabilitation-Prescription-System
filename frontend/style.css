@@ -1622,6 +1622,21 @@ textarea {
   .vas-date-spacer {
     display: none;
   }
+
+  .review-submit-wrap {
+    display: block;
+    width: 100%;
+  }
+
+  .doctor-picker-popover {
+    top: auto;
+    bottom: calc(100% + 8px);
+    left: 0;
+    right: 0;
+    min-width: 0;
+    width: 100%;
+    max-height: min(280px, 42vh);
+  }
 }
 
 @media (max-width: 480px) {
@@ -2913,6 +2928,16 @@ textarea {
   background: rgba(250, 252, 255, 0.92);
 }
 
+.prescription-collaboration-card {
+  position: relative;
+  z-index: 2;
+  overflow: visible;
+}
+
+.prescription-collaboration-card.doctor-picker-open {
+  z-index: 30;
+}
+
 .prescription-collaboration-card h3,
 .doctor-section h3 {
   margin: 0 0 8px;
@@ -3071,14 +3096,17 @@ textarea {
 .review-submit-wrap {
   position: relative;
   display: inline-block;
+  z-index: 1;
 }
 
 .doctor-picker-popover {
   position: absolute;
   top: calc(100% + 8px);
   left: 0;
-  z-index: 20;
+  z-index: 40;
   min-width: min(320px, 92vw);
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
   padding: 12px;
   border-radius: 14px;
   border: 1px solid rgba(26, 115, 232, 0.22);
