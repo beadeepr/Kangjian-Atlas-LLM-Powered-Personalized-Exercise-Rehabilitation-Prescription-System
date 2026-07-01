@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 from typing import Any
 
@@ -283,7 +283,7 @@ def _visibility_guard(action_id: str, keypoints: list[list[float]], visibility: 
     required = required_map.get(action_id, list(range(min(17, len(visibility)))))
     missing = []
     for index in required:
-        if index >= len(visibility) or visibility[index] < 0.1:
+        if index >= len(visibility) or visibility[index] < 0.7:
             missing.append(KEYPOINT_NAMES.get(index, f"关键点{index}"))
     if not missing:
         return None
@@ -399,18 +399,18 @@ def _check_neck_bend(keypoints: list[list[float]]) -> dict[str, Any]:
     dist_right = calculate_distance(right_ear, right_shoulder)
     active_dist = min(dist_left, dist_right)
 
-    if not alignment_ok:
-        # 未正对摄像头：基于距离给分但封顶 65
-        raw = _linear_map(active_dist, best=0.0, worst=0.25, best_score=95, worst_score=25)
-        raw = min(raw, 65)
-        return _score_response(
-            ["请正对摄像头，避免转头或身体旋转，再进行侧屈。"],
-            int(round(raw)),
-            action_id="neck_side_bend",
-        )
+    # if not alignment_ok:
+    #     # 未正对摄像头：基于距离给分但封顶 65
+    #     raw = _linear_map(active_dist, best=0.0, worst=0.25, best_score=95, worst_score=25)
+    #     raw = min(raw, 65)
+    #     return _score_response(
+    #         ["请正对摄像头，避免转头或身体旋转，再进行侧屈。"],
+    #         int(round(raw)),
+    #         action_id="neck_side_bend",
+    #     )
 
     # 连续评分：0 → 95, 0.10 → 80, 0.25 → 25
-    raw = _linear_map(active_dist, best=0.0, worst=0.25, best_score=95, worst_score=25)
+    raw = _linear_map(active_dist, best=0.45, worst=0.70, best_score=95, worst_score=25)
 
     feedback = _graded_feedback(
         raw,
