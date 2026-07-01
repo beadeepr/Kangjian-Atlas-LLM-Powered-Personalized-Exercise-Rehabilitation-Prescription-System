@@ -237,6 +237,8 @@ def build_auto_adjustment(db: Session, prescription: models.PrescriptionModel) -
 
 
 def apply_adjustment(db: Session, adjustment: models.PrescriptionAdjustmentModel) -> models.PrescriptionModel:
+    from .crud import next_prescription_sequence_no
+
     source = adjustment.prescription
     adjusted_actions = adjustment.adjusted_actions or []
     new_prescription = models.PrescriptionModel(
@@ -247,6 +249,7 @@ def apply_adjustment(db: Session, adjustment: models.PrescriptionAdjustmentModel
         symptoms=source.symptoms,
         history=source.history,
         summary=adjustment.summary or source.summary,
+        sequence_no=next_prescription_sequence_no(db, source.user_id),
         raw_response={
             "source_prescription_id": source.id,
             "adjustment_id": adjustment.id,

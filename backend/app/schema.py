@@ -393,6 +393,7 @@ class ActionUpdateRequest(BaseModel):
 
 class PrescriptionResponse(BaseModel):
     id: Optional[int] = None
+    sequence_no: Optional[int] = None
     patient_profile_id: Optional[int] = None
     patient_name: Optional[str] = None
     patient_age: Optional[int] = None

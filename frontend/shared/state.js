@@ -126,6 +126,10 @@ export function makeGoToStep(ctx) {
       page.classList.toggle("active", page.id === `page-${step}`);
     });
 
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTop = 0;
+    document.body.scrollTop = 0;
+
     updateStepNav(
       step,
       isSessionReady(),

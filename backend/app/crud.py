@@ -1,3 +1,4 @@
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from . import models, schema
 import base64
@@ -356,6 +357,16 @@ def list_prescriptions(db: Session, user_id: int | None = None):
     return query.order_by(models.PrescriptionModel.created_at.desc()).all()
 
 
+def next_prescription_sequence_no(db: Session, user_id: int | None) -> int:
+    query = db.query(func.max(models.PrescriptionModel.sequence_no))
+    if user_id is None:
+        query = query.filter(models.PrescriptionModel.user_id.is_(None))
+    else:
+        query = query.filter(models.PrescriptionModel.user_id == user_id)
+    current_max = query.scalar()
+    return (current_max or 0) + 1
+
+
 def create_prescription(
     db: Session,
     prescription: schema.PrescriptionRequest,
@@ -436,7 +447,8 @@ def create_prescription(
         symptoms=prescription.symptoms,
         history=prescription.history,
         summary=summary,
-        raw_response=raw_response
+        raw_response=raw_response,
+        sequence_no=next_prescription_sequence_no(db, user_id),
     )
     db.add(db_prescription)
     db.commit()

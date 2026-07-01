@@ -1574,12 +1574,53 @@ textarea {
   }
 
   .video-shell {
-    min-height: 300px;
+    min-height: 240px;
+    max-height: 50vh;
+    aspect-ratio: 4 / 3;
+  }
+
+  .training-layout {
+    padding: 14px;
+    gap: 14px;
   }
 
   .action-card img {
     height: 120px;
     object-fit: contain;
+  }
+
+  /* Reduce mobile compositing glitches without stripping base UI styles */
+  body::before {
+    display: none;
+  }
+
+  .card,
+  .app-header {
+    backdrop-filter: none;
+    background: #fff;
+  }
+
+  .app-header {
+    background: rgba(245, 248, 255, 0.98);
+  }
+
+  .action-card:hover,
+  .btn-primary:hover,
+  .btn-cyan:hover,
+  .btn-secondary:hover,
+  .btn-success:hover,
+  .step-item:not(:disabled):hover {
+    transform: none;
+  }
+
+  .vas-date {
+    transform: none;
+    font-size: 0.62rem;
+    margin-top: 8px;
+  }
+
+  .vas-date-spacer {
+    display: none;
   }
 }
 
@@ -1606,6 +1647,11 @@ textarea {
   .page-actions,
   .training-actions {
     width: 100%;
+  }
+
+  .video-shell {
+    min-height: 210px;
+    max-height: 44vh;
   }
 }
 
